@@ -1,4 +1,4 @@
-classdef ArrayPlatform
+classdef ArrayPlatform < handle
     % ArrayPlatform Class: Manages the geometry and kinematics of the antenna array.
     
     properties
@@ -28,6 +28,19 @@ classdef ArrayPlatform
             end
         end
         
+        function num = get_num_virtual_elements(obj)
+            %GET_NUM_VIRTUAL_ELEMENTS Returns the total number of MIMO virtual elements.
+            num = numel(obj.tx_indices) * numel(obj.rx_indices);
+        end
+        
+        function num = get_num_tx(obj)
+            num = numel(obj.tx_indices);
+        end
+        
+        function num = get_num_rx(obj)
+            num = numel(obj.rx_indices);
+        end
+        
         function obj = set_trajectory(obj, trajectory_func)
             % Method to define the motion of the platform.
             obj.trajectory_func = trajectory_func;
@@ -37,10 +50,37 @@ classdef ArrayPlatform
             % Calculates the absolute positions of all physical elements at a given time t.
             platform_state = obj.trajectory_func(t);
             platform_pos = platform_state.position;
+            platform_orientation_deg = platform_state.orientation; % [roll, pitch, yaw] in degrees
+
+            % --- FIX: Implement 3D rotation based on orientation ---
+            % Convert orientation from degrees to radians for trigonometric functions
+            orientation_rad = deg2rad(platform_orientation_deg);
+            alpha = orientation_rad(3); % Yaw around Z-axis
+            beta = orientation_rad(2);  % Pitch around Y-axis
+            gamma = orientation_rad(1); % Roll around X-axis
+
+            % Create rotation matrices for Z-Y-X convention
+            Rz = [cos(alpha), -sin(alpha), 0;
+                  sin(alpha),  cos(alpha), 0;
+                  0,           0,          1];
             
-            % Note: For simplicity, this version does not apply rotation. 
-            % A full implementation would apply a rotation matrix based on orientation.
-            positions = obj.physical_elements + platform_pos;
+            Ry = [cos(beta),  0, sin(beta);
+                  0,          1, 0;
+                 -sin(beta), 0, cos(beta)];
+
+            Rx = [1, 0,           0;
+                  0, cos(gamma), -sin(gamma);
+                  0, sin(gamma),  cos(gamma)];
+            
+            % Combined rotation matrix
+            R = Rz * Ry * Rx;
+
+            % Apply rotation to the relative element positions, then add platform's position.
+            % Note: physical_elements is [N x 3], so we need to transpose it for matrix
+            % multiplication with R [3 x 3], and then transpose back.
+            rotated_elements = (R * obj.physical_elements')';
+            
+            positions = rotated_elements + platform_pos;
         end
         
         function virtual_positions = get_mimo_virtual_positions(obj, t)
