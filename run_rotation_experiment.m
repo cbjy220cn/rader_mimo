@@ -39,13 +39,13 @@ target1_pos = [target_range * sind(theta1_true) * cosd(phi1_true), ...
                target_range * cosd(theta1_true)];
 target1 = Target(target1_pos, [5, 0, 0], 1); % Add small velocity for decorrelation
 
-theta2_true = 32; % 2 degree separation
-phi2_true = 20;
-target2_pos = [target_range * sind(theta2_true) * cosd(phi2_true), ...
-               target_range * sind(theta2_true) * sind(phi2_true), ...
-               target_range * cosd(theta2_true)];
-target2 = Target(target2_pos, [-5, 0, 0], 1); % Add small opposing velocity
-targets = {target1, target2};
+% theta2_true = 32; % 2 degree separation
+% phi2_true = 20;
+% target2_pos = [target_range * sind(theta2_true) * cosd(phi2_true), ...
+%                target_range * sind(theta2_true) * sind(phi2_true), ...
+%                target_range * cosd(theta2_true)];
+% target2 = Target(target2_pos, [-5, 0, 0], 1); % Add small opposing velocity
+targets = {target1};
 
 % Number of array elements for a fair comparison
 num_elements = 8;

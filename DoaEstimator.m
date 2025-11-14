@@ -105,6 +105,11 @@ classdef DoaEstimator
         function A_u = build_steering_matrix(obj, t_axis, u)
             % Builds the generalized steering matrix A(u) for a given direction u.
             % A(u) is a [M x K] matrix, where M is num_virtual_elements and K is num_snapshots.
+            %
+            % 合成孔径模式：
+            % - 每个时刻的阵列位置不同（全局坐标系）
+            % - 目标方向u在全局坐标系中固定
+            % - 导向矢量反映从不同位置观测同一目标的相位关系
             
             num_virtual_elements = obj.array_platform.get_num_virtual_elements();
             num_snapshots = numel(t_axis);
@@ -113,13 +118,13 @@ classdef DoaEstimator
             A_u = zeros(num_virtual_elements, num_snapshots);
             
             for k = 1:num_snapshots
-                % Get virtual element positions at this specific time snapshot
+                % 获取虚拟元素在全局坐标系的位置
                 positions_k = obj.array_platform.get_mimo_virtual_positions(t_axis(k));
                 
-                % --- REVERT FIX: The steering vector is the complex conjugate of the signal's
-                % phase, which follows exp(-j*k*r). Therefore, the steering vector must
-                % use exp(+j*k*r) for coherent summation. The original implementation was correct.
-                phase = 2 * pi / lambda * (positions_k * u);
+                % 在全局坐标系中计算相位
+                % 这是合成孔径的关键：每个时刻的阵列位置不同，
+                % 但都在观测全局坐标系中方向为u的同一目标
+                phase = 4 * pi / lambda * (positions_k * u);
                 A_u(:, k) = exp(1j * phase);
             end
         end

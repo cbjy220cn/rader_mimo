@@ -28,6 +28,11 @@ classdef ArrayPlatform < handle
             end
         end
         
+        function state = get_platform_state(obj, t)
+            % Returns the platform's state (position and orientation) at time t
+            state = obj.trajectory_func(t);
+        end
+        
         function num = get_num_virtual_elements(obj)
             %GET_NUM_VIRTUAL_ELEMENTS Returns the total number of MIMO virtual elements.
             num = numel(obj.tx_indices) * numel(obj.rx_indices);
@@ -41,66 +46,63 @@ classdef ArrayPlatform < handle
             num = numel(obj.rx_indices);
         end
         
+        function traj = get_trajectory(obj)
+            % Returns the trajectory function handle
+            traj = obj.trajectory_func;
+        end
+        
         function obj = set_trajectory(obj, trajectory_func)
             % Method to define the motion of the platform.
             obj.trajectory_func = trajectory_func;
         end
         
-        function positions = get_physical_positions(obj, t)
-            % Calculates the absolute positions of all physical elements at a given time t.
-            platform_state = obj.trajectory_func(t);
-            platform_pos = platform_state.position;
-            platform_orientation_deg = platform_state.orientation; % [roll, pitch, yaw] in degrees
-
-            % --- FIX: Implement 3D rotation based on orientation ---
-            % Convert orientation from degrees to radians for trigonometric functions
-            orientation_rad = deg2rad(platform_orientation_deg);
-            alpha = orientation_rad(3); % Yaw around Z-axis
-            beta = orientation_rad(2);  % Pitch around Y-axis
-            gamma = orientation_rad(1); % Roll around X-axis
-
-            % Create rotation matrices for Z-Y-X convention
-            Rz = [cos(alpha), -sin(alpha), 0;
-                  sin(alpha),  cos(alpha), 0;
-                  0,           0,          1];
+        function positions = get_physical_positions_local(obj, t)
+            % GET_PHYSICAL_POSITIONS Calculates the physical positions of all elements
+            % in the PLATFORM'S LOCAL coordinate frame at a given time t.
             
-            Ry = [cos(beta),  0, sin(beta);
-                  0,          1, 0;
-                 -sin(beta), 0, cos(beta)];
-
-            Rx = [1, 0,           0;
-                  0, cos(gamma), -sin(gamma);
-                  0, sin(gamma),  cos(gamma)];
+            state = obj.trajectory_func(t);
+            orientation = state.orientation; % [roll, pitch, yaw] in degrees
             
-            % Combined rotation matrix
+            % --- 3D Rotation ---
+            % This part calculates the rotated positions of the elements relative
+            % to the platform's origin.
+            Rz = [cosd(orientation(3)) -sind(orientation(3)) 0; sind(orientation(3)) cosd(orientation(3)) 0; 0 0 1];
+            Ry = [cosd(orientation(2)) 0 sind(orientation(2)); 0 1 0; -sind(orientation(2)) 0 cosd(orientation(2))];
+            Rx = [1 0 0; 0 cosd(orientation(1)) -sind(orientation(1)); 0 sind(orientation(1)) cosd(orientation(1))];
             R = Rz * Ry * Rx;
-
-            % Apply rotation to the relative element positions, then add platform's position.
-            % Note: physical_elements is [N x 3], so we need to transpose it for matrix
-            % multiplication with R [3 x 3], and then transpose back.
-            rotated_elements = (R * obj.physical_elements')';
             
-            positions = rotated_elements + platform_pos;
+            % Apply rotation to the base element positions
+            positions = (R * obj.physical_elements')';
         end
-        
+
         function virtual_positions = get_mimo_virtual_positions(obj, t)
-            % Calculates the positions of the MIMO virtual elements at a given time t.
-            num_tx = length(obj.tx_indices);
-            num_rx = length(obj.rx_indices);
+            % GET_MIMO_VIRTUAL_POSITIONS Calculates the virtual element positions
+            % in the GLOBAL coordinate frame at a given time t.
             
-            % Get absolute positions of all physical elements at time t
-            all_physical_pos = obj.get_physical_positions(t);
+            state = obj.trajectory_func(t);
+            platform_pos = state.position;
             
-            tx_pos = all_physical_pos(obj.tx_indices, :);
-            rx_pos = all_physical_pos(obj.rx_indices, :);
+            % Get physical element positions in the GLOBAL frame
+            physical_pos_local = obj.get_physical_positions_local(t);
+            physical_pos_global = physical_pos_local + platform_pos;
             
-            % Generate virtual element positions using convolution (p_v = p_t + p_r)
-            virtual_positions = zeros(num_tx * num_rx, 3);
-            count = 1;
-            for i = 1:num_tx
-                for j = 1:num_rx
-                    virtual_positions(count, :) = tx_pos(i, :) + rx_pos(j, :);
-                    count = count + 1;
+            tx_positions = physical_pos_global(obj.tx_indices, :);
+            rx_positions = physical_pos_global(obj.rx_indices, :);
+            
+            num_tx = size(tx_positions, 1);
+            num_rx = size(rx_positions, 1);
+            num_virtual = num_tx * num_rx;
+            virtual_positions = zeros(num_virtual, 3);
+            
+            % --- 修正：虚拟阵元排序必须与SignalGenerator中的RDC reshape顺序一致 ---
+            % SignalGenerator使用permute([1,2,4,3])，导致顺序为：Tx在内层，Rx在外层
+            % 即：(tx1,rx1), (tx2,rx1), ..., (txN,rx1), (tx1,rx2), ..., (txN,rxM)
+            idx = 1;
+            for j = 1:num_rx  % Rx在外层循环
+                for i = 1:num_tx  % Tx在内层循环
+                    % The virtual element position is the midpoint of the Tx-Rx pair
+                    virtual_positions(idx, :) = (tx_positions(i, :) + rx_positions(j, :)) / 2;
+                    idx = idx + 1;
                 end
             end
         end
