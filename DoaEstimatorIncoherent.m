@@ -71,9 +71,16 @@ classdef DoaEstimatorIncoherent
             weights = ones(1, num_snapshots);  % 默认均匀权重
             
             % 对每个快拍独立处理
+            fprintf('  处理 %d 个快拍: ', num_snapshots);
+            progress_step = max(1, floor(num_snapshots / 20));  % 显示20个进度点
+            
             for k = 1:num_snapshots
-                if options.verbose && mod(k, 10) == 0
-                    fprintf('  处理快拍 %d/%d\n', k, num_snapshots);
+                % 显示进度
+                if mod(k, progress_step) == 0 || k == num_snapshots
+                    fprintf('.');
+                    if mod(k, progress_step*10) == 0 || k == num_snapshots
+                        fprintf(' %d%%\n  ', round(100*k/num_snapshots));
+                    end
                 end
                 
                 % 提取单个快拍
@@ -119,6 +126,8 @@ classdef DoaEstimatorIncoherent
                 % 加权累加
                 spectrum_accumulated = spectrum_accumulated + weights(k) * spectrum_k;
             end
+            
+            fprintf('\n  快拍处理完成！\n');
             
             % 归一化权重
             weights = weights / sum(weights);
