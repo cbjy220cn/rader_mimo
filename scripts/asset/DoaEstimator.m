@@ -30,13 +30,14 @@ classdef DoaEstimator
             end
         end
         
-        function [spectrum, A_u_out] = estimate_gmusic(obj, snapshots, t_axis, num_targets, search_grid, u_debug)
+        function [spectrum, A_u_out] = estimate_gmusic(obj, snapshots, t_axis, num_targets, search_grid, u_debug, positions_override)
             %ESTIMATE_GMUSIC Implements the Generalized MUSIC algorithm.
             %   ... (existing documentation)
             %   u_debug (optional): A 3x1 unit vector. If provided, the function
             %                     will return the steering vector A_u for this
             %                     specific direction and skip the full spectrum search.
-
+            %   positions_override (optional): [M x 3] matrix, directly specify array positions
+            
             A_u_out = []; % Default output
 
             [num_virtual_elements, num_snapshots] = size(snapshots);
@@ -59,7 +60,11 @@ classdef DoaEstimator
             
             % --- Special Debug Mode ---
             if nargin > 5 && ~isempty(u_debug)
-                A_u_out = obj.build_steering_matrix(t_axis, u_debug);
+                if nargin > 6 && ~isempty(positions_override)
+                    A_u_out = obj.build_steering_matrix_internal(t_axis, u_debug, positions_override);
+                else
+                    A_u_out = obj.build_steering_matrix_internal(t_axis, u_debug, []);
+                end
                 spectrum = []; % Skip spectrum calculation
                 return;
             end
@@ -69,10 +74,15 @@ classdef DoaEstimator
             phi_search = search_grid.phi;
             spectrum = zeros(length(theta_search), length(phi_search));
             
-            % Pre-calculate all positions for all snapshots to build the GSV
-            all_positions = zeros(num_virtual_elements, 3, num_snapshots);
-            for k = 1:num_snapshots
-                all_positions(:,:,k) = obj.array_platform.get_mimo_virtual_positions(t_axis(k));
+            % Determine if using override positions (static array mode)
+            use_override = (nargin > 6 && ~isempty(positions_override));
+            
+            if ~use_override
+                % Pre-calculate all positions for all snapshots (SAR mode)
+                all_positions = zeros(num_virtual_elements, 3, num_snapshots);
+                for k = 1:num_snapshots
+                    all_positions(:,:,k) = obj.array_platform.get_mimo_virtual_positions(t_axis(k));
+                end
             end
 
             % Loop through all search directions
@@ -83,7 +93,14 @@ classdef DoaEstimator
                     
                     u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
                     
-                    A_u = obj.build_steering_matrix(t_axis, u);
+                    if use_override
+                        A_u = obj.build_steering_matrix_internal(t_axis, u, positions_override);
+                    else
+                        A_u = obj.build_steering_matrix_internal(t_axis, u, []);
+                    end
+                    
+                    % ⚠️ 关键修复：归一化导向矢量
+                    A_u = A_u / norm(A_u, 'fro');
                     
                     if obj.use_gpu
                         A_u = gpuArray(A_u); % Transfer steering vector to GPU
@@ -102,31 +119,49 @@ classdef DoaEstimator
             grid = search_grid;
         end
         
-        function A_u = build_steering_matrix(obj, t_axis, u)
+        function A_u = build_steering_matrix_internal(obj, t_axis, u, positions_override)
             % Builds the generalized steering matrix A(u) for a given direction u.
             % A(u) is a [M x K] matrix, where M is num_virtual_elements and K is num_snapshots.
+            %
+            % positions_override: [M x 3] matrix, if provided, uses these positions
+            %                     instead of querying array_platform (for static arrays)
             %
             % 合成孔径模式：
             % - 每个时刻的阵列位置不同（全局坐标系）
             % - 目标方向u在全局坐标系中固定
             % - 导向矢量反映从不同位置观测同一目标的相位关系
             
-            num_virtual_elements = obj.array_platform.get_num_virtual_elements();
             num_snapshots = numel(t_axis);
             lambda = obj.radar_params.lambda;
             
-            A_u = zeros(num_virtual_elements, num_snapshots);
-            
-            for k = 1:num_snapshots
-                % 获取虚拟元素在全局坐标系的位置
-                positions_k = obj.array_platform.get_mimo_virtual_positions(t_axis(k));
+            if nargin > 3 && ~isempty(positions_override)
+                % Static array mode: use provided positions for all snapshots
+                num_virtual_elements = size(positions_override, 1);
+                A_u = zeros(num_virtual_elements, num_snapshots);
                 
-                % 在全局坐标系中计算相位
-                % 这是合成孔径的关键：每个时刻的阵列位置不同，
-                % 但都在观测全局坐标系中方向为u的同一目标
-                phase = 4 * pi / lambda * (positions_k * u);
-                A_u(:, k) = exp(1j * phase);
+                phase = 4 * pi / lambda * (positions_override * u);
+                for k = 1:num_snapshots
+                    A_u(:, k) = exp(1j * phase);  % Same for all snapshots (static)
+                end
+            else
+                % SAR mode: query positions for each snapshot
+                num_virtual_elements = obj.array_platform.get_num_virtual_elements();
+                A_u = zeros(num_virtual_elements, num_snapshots);
+                
+                for k = 1:num_snapshots
+                    % 获取虚拟元素在全局坐标系的位置
+                    positions_k = obj.array_platform.get_mimo_virtual_positions(t_axis(k));
+                    
+                    % 在全局坐标系中计算相位
+                    phase = 4 * pi / lambda * (positions_k * u);
+                    A_u(:, k) = exp(1j * phase);
+                end
             end
+        end
+        
+        % Backward compatibility wrapper
+        function A_u = build_steering_matrix(obj, t_axis, u)
+            A_u = obj.build_steering_matrix_internal(t_axis, u, []);
         end
 
     end
