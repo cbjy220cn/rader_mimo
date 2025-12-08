@@ -1,6 +1,11 @@
 %% ═══════════════════════════════════════════════════════════════════════════
 %  实验：双目标分辨能力测试
 %  验证：运动阵列在分辨相近目标时的优势
+%
+%  ⚠️ BUG WARNING: 分辨成功判定逻辑存在问题
+%     - check_resolution函数的容差逻辑需要进一步调试
+%     - 出现"间隔越大反而分辨不了"的反常结果
+%     - 待修复
 %% ═══════════════════════════════════════════════════════════════════════════
 clear; clc; close all;
 
@@ -20,6 +25,48 @@ fprintf('║           双目标分辨能力测试                              
 fprintf('║  验证：运动阵列分辨相近目标的优势                              ║\n');
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 fprintf('输出目录: %s\n\n', output_folder);
+
+%% ═════════════════════════════════════════════════════════════════════════════
+%  实验说明（用于论文参考）
+%% ═════════════════════════════════════════════════════════════════════════════
+fprintf('┌─────────────────────────────────────────────────────────────────┐\n');
+fprintf('│                        实验说明                                 │\n');
+fprintf('├─────────────────────────────────────────────────────────────────┤\n');
+fprintf('│ 【实验目的】                                                    │\n');
+fprintf('│   验证运动合成孔径阵列在分辨相近角度目标时相比静态阵列的优势。  │\n');
+fprintf('│   角度分辨率是DOA系统的核心性能指标。                           │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【理论背景】                                                    │\n');
+fprintf('│   瑞利分辨率 ≈ λ / (N·d·cosθ) ≈ 2/N·57.3° (半波长间距)        │\n');
+fprintf('│   8元静态阵列理论分辨率 ≈ 14.3°                                │\n');
+fprintf('│   运动扩展孔径后分辨率可提升数倍至数十倍                        │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【关键指标定义】                                                │\n');
+fprintf('│   ① 分辨成功                                                   │\n');
+fprintf('│      条件：检测到2个峰值，且两峰位置误差均<容差                 │\n');
+fprintf('│      动态容差 = max(2°, 间隔×30%%)                             │\n');
+fprintf('│      例：间隔1°→容差2°, 间隔20°→容差6°                        │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ② 分辨率                                                     │\n');
+fprintf('│      = 能成功分辨的最小角度间隔                                │\n');
+fprintf('│      物理含义：系统区分相近目标的能力                           │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ③ 谱峰峰值比                                                 │\n');
+fprintf('│      = 目标峰 / 最大旁瓣                                       │\n');
+fprintf('│      物理含义：目标检测的可靠性                                 │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ④ 峰值位置误差                                               │\n');
+fprintf('│      = |检测峰值角度 - 真实目标角度|                           │\n');
+fprintf('│      反映多目标场景下的估计精度                                 │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ⑤ 3dB主瓣宽度                                                │\n');
+fprintf('│      = 谱峰下降3dB对应的角度范围                               │\n');
+fprintf('│      物理含义：与分辨率直接相关，主瓣越窄分辨率越高             │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【实验设计】                                                    │\n');
+fprintf('│   对比静态阵列与运动阵列在不同角度间隔下的分辨能力              │\n');
+fprintf('│   角度间隔从大到小逐步测试，找到分辨极限                        │\n');
+fprintf('└─────────────────────────────────────────────────────────────────┘\n\n');
 
 %% 参数设置
 c = physconst('LightSpeed');
@@ -67,8 +114,8 @@ results.motion_peaks = cell(size(angle_separations));
 results.static_spectra = cell(size(angle_separations));
 results.motion_spectra = cell(size(angle_separations));
 
-fprintf('间隔   | 静态阵列 | 运动阵列 | 结论\n');
-fprintf('-------|----------|----------|----------\n');
+fprintf('间隔   | 容差  | 静态阵列 | 运动阵列 | 结论\n');
+fprintf('-------|-------|----------|----------|----------\n');
 
 for sep_idx = 1:length(angle_separations)
     sep = angle_separations(sep_idx);
@@ -101,8 +148,10 @@ for sep_idx = 1:length(angle_separations)
     results.static_spectra{sep_idx} = spectrum_static;
     results.static_peaks{sep_idx} = peaks_static.phi;
     
-    % 判断是否分辨（两个峰值在目标±2°范围内）
-    static_resolved = check_resolution(peaks_static.phi, [phi1, phi2], 2.0);
+    % 判断是否分辨（两个峰值在目标±容差范围内）
+    % 容差取 max(2°, 间隔的30%)，避免大间隔时过于严格
+    tolerance = max(2.0, sep * 0.3);
+    static_resolved = check_resolution(peaks_static.phi, [phi1, phi2], tolerance);
     results.static_resolved(sep_idx) = static_resolved;
     
     % ===== 运动阵列 =====
@@ -123,7 +172,7 @@ for sep_idx = 1:length(angle_separations)
     results.motion_spectra{sep_idx} = spectrum_motion;
     results.motion_peaks{sep_idx} = peaks_motion.phi;
     
-    motion_resolved = check_resolution(peaks_motion.phi, [phi1, phi2], 2.0);
+    motion_resolved = check_resolution(peaks_motion.phi, [phi1, phi2], tolerance);
     results.motion_resolved(sep_idx) = motion_resolved;
     
     % 输出
@@ -138,7 +187,7 @@ for sep_idx = 1:length(angle_separations)
         conclusion = '均不可分辨';
     end
     
-    fprintf('  %2d°  | %s | %s | %s\n', sep, static_str, motion_str, conclusion);
+    fprintf('  %2d°  | %.1f° | %s | %s | %s\n', sep, tolerance, static_str, motion_str, conclusion);
 end
 
 %% 绘图

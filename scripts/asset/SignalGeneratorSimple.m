@@ -64,8 +64,7 @@ classdef SignalGeneratorSimple
                         % 双程距离（雷达往返）
                         range = 2 * norm(target_pos - virt_pos);
                         
-                        % 空间相位 = 4π/λ × 单程距离
-                        % 或等效于 2π/λ × 双程距离
+                        % 空间相位 = 2π/λ × 双程距离 = 4π/λ × 单程距离
                         phase = 2 * pi * range / lambda;
                         
                         % 信号 = 幅度 × RCS × exp(-j×相位)

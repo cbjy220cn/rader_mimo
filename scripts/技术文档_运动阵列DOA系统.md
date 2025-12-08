@@ -64,21 +64,41 @@ $$P_{avg}(\theta, \phi) = \frac{1}{K} \sum_{k=1}^{K} P_k(\theta, \phi)$$
 - **致命问题**: 单快拍协方差矩阵 $\mathbf{R}_k = \mathbf{x}_k \mathbf{x}_k^H$ 是**秩-1矩阵**
 - **后果**: 噪声子空间估计不准确，SNR损失约6dB
 
-#### 方法3: 合成虚拟阵列MUSIC ⭐（最优）
+#### 方法3a: 相干合成孔径波束形成 (CSA-BF) ⭐（默认）
 
-$$\text{M阵元} \times \text{K快拍} \rightarrow \text{M×K 虚拟阵元}$$
+$$\text{M阵元} \times \text{K快拍} \rightarrow \text{M×K 虚拟阵列}$$
 
 ```matlab
-% 核心思想：时间展开为空间
+% 核心思想：时间展开为空间，使用匹配滤波
 for k = 1:K
     virtual_positions(k) = array.get_positions(t_k)
     virtual_signals(k) = snapshots(:, k)
 end
-% 虚拟阵列维度: [M×K, 3]，如[512, 3]
+% 虚拟阵列: [M×K, 3]，如[512, 3]
+% 波束形成: P(θ) = |a(θ)' × x_virtual|² / |a(θ)|²
 ```
 
-- **矩阵维度**: (M×K) × (M×K)（如512×512）
-- **优势**: 充分利用合成孔径，无SNR损失
+- **不用协方差矩阵**：直接使用信号向量进行匹配滤波
+- **优势**: 完全相干利用合成孔径，分辨率最高
+- **注意**: 对相位误差敏感
+
+#### 方法3b: 非相干合成孔径MUSIC (ISA-MUSIC)
+
+$$P_{ISA}(\theta) = \sum_{seg} P_{MUSIC}^{(seg)}(\theta)$$
+
+```matlab
+% 核心思想：分段MUSIC + 谱累加
+for seg = 1:num_segments
+    seg_snapshots = snapshots(:, seg_indices);
+    Rxx = seg_snapshots * seg_snapshots' / K_seg;  % M×M 满秩！
+    [V,D] = eig(Rxx); Qn = V(:, targets+1:end);
+    spectrum += music(positions_seg, Qn, θ);
+end
+```
+
+- **协方差矩阵**: 每段 M×M，满秩（解决秩1问题）
+- **优势**: 对相位误差鲁棒，有超分辨能力
+- **孔径利用**: 通过段间位置差异间接利用
 
 ### 2.2 为什么纯旋转无法扩展孔径？
 

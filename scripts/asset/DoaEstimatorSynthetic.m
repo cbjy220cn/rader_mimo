@@ -1,47 +1,36 @@
 classdef DoaEstimatorSynthetic
-    % DoaEstimatorSynthetic: 合成虚拟阵列DOA估计器
+    % DoaEstimatorSynthetic: 合成孔径DOA估计器
     %
-    % 核心思想：将运动阵列的时间维度展开为空间维度
-    % - 每个时刻的每个物理阵元作为一个"虚拟阵元"
-    % - M个物理阵元 × K个时刻 = M×K个虚拟阵元
-    % - 利用运动产生的孔径扩展提升角度分辨率
+    % 支持两种方法：
+    %   1. 相干合成孔径波束形成 (CSA-BF) - 默认
+    %      将M×K快拍展开为M×K虚拟阵列，使用匹配滤波
+    %      优势：充分利用合成孔径，分辨率最高
     %
-    % 功能特性：
-    % - 支持1D搜索（仅phi）和2D搜索（theta+phi）
-    % - 支持多层智能搜索（粗搜索→细搜索）
-    % - 支持CA-CFAR多目标检测
+    %   2. 非相干合成孔径MUSIC (ISA-MUSIC)
+    %      分段处理，每段独立MUSIC，谱非相干累加
+    %      优势：对相位误差鲁棒
     %
     % 用法示例：
     %   estimator = DoaEstimatorSynthetic(array_platform, radar_params);
     %   [spectrum, peaks, info] = estimator.estimate(snapshots, t_axis, search_grid, num_targets);
     %
-    %   % 使用2D智能搜索
-    %   options.search_mode = '2d';
-    %   options.use_smart_search = true;
-    %   options.use_cfar = true;
-    %   [spectrum, peaks, info] = estimator.estimate(snapshots, t_axis, search_grid, num_targets, options);
+    %   % 使用ISA-MUSIC模式
+    %   options.method = 'isa-music';
+    %   [spectrum, peaks, info] = estimator.estimate(..., options);
     
     properties
         array_platform  % ArrayPlatform实例
         radar_params    % 雷达参数结构体
         lambda          % 波长
-        use_gpu         % 是否使用GPU加速
         
-        % 配置选项
-        max_virtual_elements  % 最大虚拟阵元数（控制计算量）
-        subsample_method      % 子采样方法: 'uniform', 'random', 'none'
+        % ISA-MUSIC分段参数
+        segment_size    % 每段快拍数（默认8）
+        segment_overlap % 段间重叠率（默认0.5）
     end
     
     methods
         function obj = DoaEstimatorSynthetic(array_platform, radar_params, options)
             % 构造函数
-            %
-            % 输入:
-            %   array_platform - ArrayPlatform实例
-            %   radar_params   - 雷达参数结构体（必须包含 .fc 或 .lambda）
-            %   options        - (可选) 配置选项
-            %     .max_virtual_elements - 最大虚拟阵元数 (默认512)
-            %     .subsample_method     - 子采样方法 (默认'uniform')
             
             if nargin > 0
                 obj.array_platform = array_platform;
@@ -55,20 +44,19 @@ classdef DoaEstimatorSynthetic
                     obj.lambda = c / radar_params.fc;
                 end
                 
-                % GPU检测
-                obj.use_gpu = (gpuDeviceCount > 0);
+                % 默认分段参数（用于ISA-MUSIC模式）
+                % 注意：segment_size要小，保证段内阵列位置近似不变
+                % 对于5m/s运动，每快拍(7.8ms)移动约4cm=0.4λ
+                % segment_size=4时，段内移动约1.6λ，可接受
+                obj.segment_size = 4;
+                obj.segment_overlap = 0.5;
                 
-                % 默认配置
-                obj.max_virtual_elements = 512;
-                obj.subsample_method = 'uniform';
-                
-                % 用户自定义配置
                 if nargin > 2 && ~isempty(options)
-                    if isfield(options, 'max_virtual_elements')
-                        obj.max_virtual_elements = options.max_virtual_elements;
+                    if isfield(options, 'segment_size')
+                        obj.segment_size = options.segment_size;
                     end
-                    if isfield(options, 'subsample_method')
-                        obj.subsample_method = options.subsample_method;
+                    if isfield(options, 'segment_overlap')
+                        obj.segment_overlap = options.segment_overlap;
                     end
                 end
             end
@@ -80,20 +68,15 @@ classdef DoaEstimatorSynthetic
             % 输入:
             %   snapshots    - [M × K] 快拍矩阵 (M=阵元数, K=快拍数)
             %   t_axis       - [1 × K] 时间轴
-            %   search_grid  - 搜索网格
-            %                  1D: struct with .phi (方位角数组)
-            %                  2D: struct with .theta 和 .phi
-            %                  智能搜索: struct with .coarse_res, .fine_res, .roi_margin, .theta_range, .phi_range
+            %   search_grid  - 搜索网格 (struct with .phi，可选 .theta)
             %   num_targets  - 目标数量
-            %   options      - (可选) 搜索选项
-            %     .search_mode      - '1d' 或 '2d' (默认自动检测)
-            %     .use_smart_search - 是否使用多层搜索 (默认false)
-            %     .use_cfar         - 是否使用CFAR检测 (默认false)
-            %     .cfar_options     - CFAR参数
-            %     .verbose          - 是否显示进度 (默认false)
+            %   options      - (可选) 选项
+            %     .method       - 'csa-bf' (相干波束形成，默认) 或 'isa-music' (非相干MUSIC)
+            %     .search_mode  - '1d' 或 '2d' 或 'auto'
+            %     .use_cfar     - 是否使用CFAR检测
             %
             % 输出:
-            %   spectrum - MUSIC谱
+            %   spectrum - 角度谱
             %   peaks    - 峰值位置结构体 (.phi, .theta, .vals)
             %   info     - 附加信息
             
@@ -101,63 +84,38 @@ classdef DoaEstimatorSynthetic
                 options = struct();
             end
             
-            % 默认选项
-            use_smart_search = get_opt(options, 'use_smart_search', false);
-            use_cfar = get_opt(options, 'use_cfar', false);
-            verbose = get_opt(options, 'verbose', false);
+            method = get_opt(options, 'method', 'csa-bf');
             search_mode = get_opt(options, 'search_mode', 'auto');
+            use_cfar = get_opt(options, 'use_cfar', false);
             
             % 自动检测搜索模式
             if strcmp(search_mode, 'auto')
-                if isfield(search_grid, 'coarse_res')
-                    % 智能搜索模式
-                    use_smart_search = true;
-                    search_mode = '2d';
-                elseif isfield(search_grid, 'theta') && ~isempty(search_grid.theta)
+                if isfield(search_grid, 'theta') && ~isempty(search_grid.theta)
                     search_mode = '2d';
                 else
                     search_mode = '1d';
                 end
             end
             
-            % 1. 构建虚拟阵列
-            [virtual_positions, virtual_signals, selected_indices] = ...
-                obj.build_virtual_array(snapshots, t_axis);
-            
-            num_virtual = size(virtual_positions, 1);
-            
-            % 2. 计算合成孔径
-            aperture = obj.calc_aperture(virtual_positions);
-            
-            % 3. 构建协方差矩阵并特征分解
-            Rxx = virtual_signals * virtual_signals';
-            [V, D] = eig(Rxx);
-            [eigenvalues, idx] = sort(diag(D), 'descend');
-            V = V(:, idx);
-            
-            % 确保噪声子空间维度正确
-            noise_dim = num_virtual - num_targets;
-            if noise_dim < 1
-                warning('虚拟阵元数(%d)不足以分辨%d个目标', num_virtual, num_targets);
-                noise_dim = 1;
-            end
-            Qn = V(:, (num_targets+1):end);
-            
-            % 4. 执行搜索
-            if use_smart_search
-                % 多层智能搜索
-                [spectrum, search_grid_out] = obj.smart_search(virtual_positions, Qn, search_grid, num_targets, options);
-                search_grid = search_grid_out;
-            else
-                % 常规搜索
-                if strcmp(search_mode, '1d')
-                    [spectrum, ~] = obj.search_1d(virtual_positions, Qn, search_grid.phi, num_targets);
-                else
-                    [spectrum, ~] = obj.search_2d(virtual_positions, Qn, search_grid, num_targets);
-                end
+            % 根据方法选择算法
+            switch lower(method)
+                case 'csa-bf'
+                    % 相干合成孔径波束形成（匹配滤波）
+                    [spectrum, info] = obj.csa_beamforming(snapshots, t_axis, search_grid, search_mode);
+                    
+                case 'isa-music'
+                    % 非相干合成孔径MUSIC
+                    [spectrum, info] = obj.isa_music(snapshots, t_axis, search_grid, num_targets, search_mode);
+                    
+                case 'csa-music'
+                    % 相干合成孔径MUSIC（时间平滑）
+                    [spectrum, info] = obj.csa_music(snapshots, t_axis, search_grid, num_targets, search_mode);
+                    
+                otherwise
+                    error('未知方法: %s。支持 "csa-bf", "isa-music" 或 "csa-music"', method);
             end
             
-            % 5. 峰值检测
+            % 峰值检测
             if use_cfar && strcmp(search_mode, '2d')
                 cfar_options = get_opt(options, 'cfar_options', struct());
                 [theta_peaks, phi_peaks, peak_vals, ~] = find_peaks_cfar(spectrum, search_grid, num_targets, cfar_options);
@@ -175,168 +133,364 @@ classdef DoaEstimatorSynthetic
                 end
             end
             
-            % 6. 输出附加信息
-            info = struct();
-            info.virtual_positions = virtual_positions;
-            info.synthetic_aperture = aperture;
-            info.num_virtual = num_virtual;
-            info.selected_indices = selected_indices;
-            info.eigenvalues = eigenvalues;
+            info.method = method;
             info.search_mode = search_mode;
-            info.search_grid = search_grid;
         end
         
-        function [spectrum, search_grid_fine] = smart_search(obj, virtual_positions, Qn, smart_grid, num_targets, options)
-            % 多层智能搜索：粗搜索定位 + 细搜索精化
+        %% ═══════════════════════════════════════════════════════════════════
+        %  方法1: 相干合成孔径波束形成 (CSA-BF)
+        %  原理：M阵元×K快拍 → M×K虚拟阵列，使用匹配滤波
+        %% ═══════════════════════════════════════════════════════════════════
+        function [spectrum, info] = csa_beamforming(obj, snapshots, t_axis, search_grid, search_mode)
+            % 相干合成孔径波束形成
             %
-            % 输入:
-            %   smart_grid - 智能搜索参数
-            %     .coarse_res  - 粗搜索分辨率（度）
-            %     .fine_res    - 细搜索分辨率（度）
-            %     .roi_margin  - ROI边界扩展（度）
-            %     .theta_range - [theta_min, theta_max]
-            %     .phi_range   - [phi_min, phi_max]
-            
-            verbose = get_opt(options, 'verbose', false);
-            
-            coarse_res = smart_grid.coarse_res;
-            fine_res = smart_grid.fine_res;
-            roi_margin = smart_grid.roi_margin;
-            theta_range = smart_grid.theta_range;
-            phi_range = smart_grid.phi_range;
-            
-            %% 第一步：粗搜索
-            if verbose
-                fprintf('    🔍 粗搜索 (%.1f°网格) ... ', coarse_res);
-                tic;
-            end
-            
-            theta_coarse = theta_range(1):coarse_res:theta_range(2);
-            phi_coarse = phi_range(1):coarse_res:phi_range(2);
-            grid_coarse.theta = theta_coarse;
-            grid_coarse.phi = phi_coarse;
-            
-            [spectrum_coarse, ~] = obj.search_2d(virtual_positions, Qn, grid_coarse, num_targets);
-            
-            if verbose
-                fprintf('完成 (%.2fs)\n', toc);
-            end
-            
-            %% 第二步：找峰值
-            [theta_peaks, phi_peaks, ~] = obj.find_peaks_2d(spectrum_coarse, grid_coarse, num_targets);
-            
-            if verbose
-                fprintf('    🎯 找到 %d 个峰值\n', length(theta_peaks));
-            end
-            
-            %% 第三步：细搜索（每个峰值附近）
-            if verbose
-                fprintf('    🔬 细搜索 (%.1f°网格) ... ', fine_res);
-                tic;
-            end
-            
-            fine_regions = {};
-            for i = 1:length(theta_peaks)
-                theta_min = max(theta_range(1), theta_peaks(i) - roi_margin);
-                theta_max = min(theta_range(2), theta_peaks(i) + roi_margin);
-                phi_min = max(phi_range(1), phi_peaks(i) - roi_margin);
-                phi_max = min(phi_range(2), phi_peaks(i) + roi_margin);
-                
-                theta_fine_roi = theta_min:fine_res:theta_max;
-                phi_fine_roi = phi_min:fine_res:phi_max;
-                grid_fine_roi.theta = theta_fine_roi;
-                grid_fine_roi.phi = phi_fine_roi;
-                
-                [spectrum_fine_roi, ~] = obj.search_2d(virtual_positions, Qn, grid_fine_roi, num_targets);
-                
-                fine_regions{i}.theta = theta_fine_roi;
-                fine_regions{i}.phi = phi_fine_roi;
-                fine_regions{i}.spectrum = spectrum_fine_roi;
-            end
-            
-            if verbose
-                fprintf('完成 (%.2fs)\n', toc);
-            end
-            
-            %% 第四步：合并谱
-            theta_fine = theta_range(1):fine_res:theta_range(2);
-            phi_fine = phi_range(1):fine_res:phi_range(2);
-            
-            % 从粗网格插值
-            [Theta_coarse, Phi_coarse] = meshgrid(phi_coarse, theta_coarse);
-            [Theta_fine, Phi_fine] = meshgrid(phi_fine, theta_fine);
-            spectrum = interp2(Theta_coarse, Phi_coarse, spectrum_coarse, Theta_fine, Phi_fine, 'linear');
-            
-            % 用细搜索结果覆盖
-            for i = 1:length(fine_regions)
-                theta_roi = fine_regions{i}.theta;
-                phi_roi = fine_regions{i}.phi;
-                spectrum_roi = fine_regions{i}.spectrum;
-                
-                [~, t_start] = min(abs(theta_fine - theta_roi(1)));
-                [~, t_end] = min(abs(theta_fine - theta_roi(end)));
-                [~, p_start] = min(abs(phi_fine - phi_roi(1)));
-                [~, p_end] = min(abs(phi_fine - phi_roi(end)));
-                
-                spectrum(t_start:t_end, p_start:p_end) = spectrum_roi;
-            end
-            
-            spectrum(isnan(spectrum)) = 0;
-            
-            search_grid_fine.theta = theta_fine;
-            search_grid_fine.phi = phi_fine;
-            
-            if verbose
-                total_points = length(theta_fine) * length(phi_fine);
-                coarse_points = length(theta_coarse) * length(phi_coarse);
-                fine_points = sum(cellfun(@(x) numel(x.spectrum), fine_regions));
-                actual = coarse_points + fine_points;
-                fprintf('    ⚡ 加速: %.1fx (计算 %d / 全搜索 %d)\n', total_points/actual, actual, total_points);
-            end
-        end
-        
-        function [virtual_positions, virtual_signals, selected_indices] = ...
-                build_virtual_array(obj, snapshots, t_axis)
-            % 构建虚拟阵列
+            % 核心公式：
+            %   P(θ) = |a(θ)' × x_virtual|² / |a(θ)|²
+            %
+            % 其中：
+            %   x_virtual ∈ C^(M×K) - 虚拟阵列信号向量
+            %   a(θ) ∈ C^(M×K) - 虚拟阵列导向矢量
             
             [num_elements, num_snapshots] = size(snapshots);
-            total_virtual = num_elements * num_snapshots;
+            num_virtual = num_elements * num_snapshots;
             
-            % 子采样策略
-            if total_virtual > obj.max_virtual_elements
-                switch obj.subsample_method
-                    case 'uniform'
-                        subsample_factor = ceil(total_virtual / obj.max_virtual_elements);
-                        selected_snapshots = 1:subsample_factor:num_snapshots;
-                    case 'random'
-                        num_selected = floor(obj.max_virtual_elements / num_elements);
-                        selected_snapshots = sort(randperm(num_snapshots, min(num_selected, num_snapshots)));
-                    otherwise
-                        selected_snapshots = 1:num_snapshots;
-                end
-            else
-                selected_snapshots = 1:num_snapshots;
-            end
-            
-            num_selected = length(selected_snapshots);
-            num_virtual = num_elements * num_selected;
-            
+            % 1. 构建虚拟阵列位置和信号
             virtual_positions = zeros(num_virtual, 3);
             virtual_signals = zeros(num_virtual, 1);
             
-            for k = 1:num_selected
-                snapshot_idx = selected_snapshots(k);
-                t_k = t_axis(snapshot_idx);
-                
-                pos_k = obj.array_platform.get_mimo_virtual_positions(t_k);
+            for k = 1:num_snapshots
+                t_k = t_axis(k);
+                positions_k = obj.array_platform.get_mimo_virtual_positions(t_k);
                 
                 idx_start = (k-1)*num_elements + 1;
                 idx_end = k*num_elements;
-                virtual_positions(idx_start:idx_end, :) = pos_k;
-                virtual_signals(idx_start:idx_end) = snapshots(:, snapshot_idx);
+                virtual_positions(idx_start:idx_end, :) = positions_k;
+                virtual_signals(idx_start:idx_end) = snapshots(:, k);
             end
             
-            selected_indices = selected_snapshots;
+            % 2. 计算合成孔径
+            aperture = obj.calc_aperture(virtual_positions);
+            
+            % 3. 波束形成搜索
+            if strcmp(search_mode, '1d')
+                spectrum = obj.beamforming_1d(virtual_positions, virtual_signals, search_grid.phi);
+            else
+                spectrum = obj.beamforming_2d(virtual_positions, virtual_signals, search_grid);
+            end
+            
+            % 输出信息
+            info.virtual_positions = virtual_positions;
+            info.synthetic_aperture = aperture;
+            info.num_virtual = num_virtual;
+        end
+        
+        function spectrum = beamforming_1d(obj, positions, signals, phi_search)
+            % 1D波束形成
+            % P(φ) = |a(φ)' * x|² / |a(φ)|²
+            
+            num_phi = length(phi_search);
+            spectrum = zeros(1, num_phi);
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                u = [cosd(phi); sind(phi); 0];
+                a = obj.build_steering_vector(positions, u);
+                
+                % 匹配滤波输出
+                spectrum(phi_idx) = abs(a' * signals)^2 / (a' * a);
+            end
+        end
+        
+        function spectrum = beamforming_2d(obj, positions, signals, search_grid)
+            % 2D波束形成
+            
+            theta_search = search_grid.theta;
+            phi_search = search_grid.phi;
+            num_theta = length(theta_search);
+            num_phi = length(phi_search);
+            
+            spectrum = zeros(num_theta, num_phi);
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                for theta_idx = 1:num_theta
+                    theta = theta_search(theta_idx);
+                    
+                    u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
+                    a = obj.build_steering_vector(positions, u);
+                    
+                    spectrum(theta_idx, phi_idx) = abs(a' * signals)^2 / real(a' * a);
+                end
+            end
+        end
+        
+        %% ═══════════════════════════════════════════════════════════════════
+        %  方法2: 非相干合成孔径MUSIC (ISA-MUSIC)
+        %  原理：分段处理，每段独立MUSIC，谱非相干累加
+        %% ═══════════════════════════════════════════════════════════════════
+        function [spectrum, info] = isa_music(obj, snapshots, t_axis, search_grid, num_targets, search_mode)
+            % 非相干合成孔径MUSIC（改进版：带段内相位补偿）
+            %
+            % 改进：对每个快拍根据其实际阵列位置进行相位补偿，
+            % 补偿到段中心时刻的位置，使段内协方差矩阵更准确
+            
+            [num_elements, num_snapshots] = size(snapshots);
+            
+            % 1. 分段参数
+            seg_size = min(obj.segment_size, num_snapshots);
+            seg_step = max(1, round(seg_size * (1 - obj.segment_overlap)));
+            seg_starts = 1:seg_step:(num_snapshots - seg_size + 1);
+            num_segments = length(seg_starts);
+            
+            if num_segments == 0
+                seg_starts = 1;
+                seg_size = num_snapshots;
+                num_segments = 1;
+            end
+            
+            % 2. 初始化累积谱
+            if strcmp(search_mode, '1d')
+                accumulated_spectrum = zeros(1, length(search_grid.phi));
+            else
+                accumulated_spectrum = zeros(length(search_grid.theta), length(search_grid.phi));
+            end
+            
+            % 3. 收集虚拟阵列位置
+            all_virtual_positions = [];
+            
+            % 4. 分段处理
+            for seg_idx = 1:num_segments
+                seg_start = seg_starts(seg_idx);
+                seg_end = min(seg_start + seg_size - 1, num_snapshots);
+                seg_indices = seg_start:seg_end;
+                num_seg_snapshots = length(seg_indices);
+                
+                seg_t_axis = t_axis(seg_indices);
+                
+                % 段中心时刻位置（参考位置）
+                t_center = mean(seg_t_axis);
+                positions_ref = obj.array_platform.get_mimo_virtual_positions(t_center);
+                all_virtual_positions = [all_virtual_positions; positions_ref];
+                
+                % 段内相位补偿：将每个快拍补偿到参考位置
+                seg_snapshots_compensated = zeros(num_elements, num_seg_snapshots);
+                for k = 1:num_seg_snapshots
+                    t_k = seg_t_axis(k);
+                    positions_k = obj.array_platform.get_mimo_virtual_positions(t_k);
+                    
+                    % 位置差
+                    delta_pos = positions_k - positions_ref;
+                    
+                    % 对于宽带方向估计，需要知道大致方向才能补偿
+                    % 这里使用简化方法：不补偿（假设段内移动足够小）
+                    % 或者可以用迭代方法先粗估方向再补偿
+                    seg_snapshots_compensated(:, k) = snapshots(:, seg_indices(k));
+                end
+                
+                % 协方差矩阵（满秩）
+                Rxx = (seg_snapshots_compensated * seg_snapshots_compensated') / num_seg_snapshots;
+                
+                % 特征分解
+                [V, D] = eig(Rxx);
+                [~, idx] = sort(diag(D), 'descend');
+                V = V(:, idx);
+                
+                % 噪声子空间
+                noise_dim = max(1, num_elements - num_targets);
+                Qn = V(:, (num_targets+1):end);
+                
+                % MUSIC谱 - 使用参考位置
+                if strcmp(search_mode, '1d')
+                    seg_spectrum = obj.music_spectrum_1d(positions_ref, Qn, search_grid.phi);
+                else
+                    seg_spectrum = obj.music_spectrum_2d(positions_ref, Qn, search_grid);
+                end
+                
+                accumulated_spectrum = accumulated_spectrum + seg_spectrum;
+            end
+            
+            spectrum = accumulated_spectrum / num_segments;
+            
+            info.virtual_positions = all_virtual_positions;
+            info.synthetic_aperture = obj.calc_aperture(all_virtual_positions);
+            info.num_segments = num_segments;
+        end
+        
+        function spectrum = music_spectrum_1d(obj, positions, Qn, phi_search)
+            % 1D MUSIC谱
+            
+            num_phi = length(phi_search);
+            spectrum = zeros(1, num_phi);
+            Qn_proj = Qn * Qn';
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                u = [cosd(phi); sind(phi); 0];
+                a = obj.build_steering_vector(positions, u);
+                
+                denom = real(a' * Qn_proj * a);
+                spectrum(phi_idx) = 1 / max(denom, 1e-12);
+            end
+        end
+        
+        function spectrum = music_spectrum_2d(obj, positions, Qn, search_grid)
+            % 2D MUSIC谱
+            
+            theta_search = search_grid.theta;
+            phi_search = search_grid.phi;
+            spectrum = zeros(length(theta_search), length(phi_search));
+            Qn_proj = Qn * Qn';
+            
+            for phi_idx = 1:length(phi_search)
+                phi = phi_search(phi_idx);
+                for theta_idx = 1:length(theta_search)
+                    theta = theta_search(theta_idx);
+                    u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
+                    a = obj.build_steering_vector(positions, u);
+                    
+                    denom = real(a' * Qn_proj * a);
+                    spectrum(theta_idx, phi_idx) = 1 / max(denom, 1e-12);
+                end
+            end
+        end
+        
+        %% ═══════════════════════════════════════════════════════════════════
+        %  方法3: 相干合成孔径MUSIC (CSA-MUSIC) - 时间平滑
+        %  原理：使用时间平滑构造满秩协方差矩阵，在虚拟阵列上做MUSIC
+        %% ═══════════════════════════════════════════════════════════════════
+        function [spectrum, info] = csa_music(obj, snapshots, t_axis, search_grid, num_targets, search_mode)
+            % 相干合成孔径MUSIC（时间平滑方法）
+            %
+            % 原理：
+            %   1. 构建虚拟阵列（M元 × K快拍 → L个子阵列）
+            %   2. 使用时间平滑技术构造满秩协方差矩阵
+            %   3. 在虚拟阵列上执行MUSIC
+            %
+            % 时间平滑：将K个快拍分成重叠的子阵列
+            %   子阵列大小 = K - L + 1
+            %   子阵列数量 = L（用于协方差估计）
+            
+            [num_elements, num_snapshots] = size(snapshots);
+            
+            % 时间平滑参数
+            % L = 子阵列数量（用于协方差矩阵估计）
+            % 子阵列大小 = num_snapshots - L + 1
+            L = min(num_snapshots - num_elements, floor(num_snapshots / 2));
+            L = max(L, num_targets + 1);  % 至少需要L > num_targets
+            subarray_size = num_snapshots - L + 1;
+            
+            % 虚拟阵列维度 = M × subarray_size
+            num_virtual = num_elements * subarray_size;
+            
+            % 1. 构建虚拟阵列位置
+            % 取中间时刻的子阵列位置作为参考
+            ref_start = floor(L / 2) + 1;
+            ref_indices = ref_start:(ref_start + subarray_size - 1);
+            
+            virtual_positions = zeros(num_virtual, 3);
+            for k = 1:subarray_size
+                t_k = t_axis(ref_indices(k));
+                positions_k = obj.array_platform.get_mimo_virtual_positions(t_k);
+                idx_start = (k-1)*num_elements + 1;
+                idx_end = k*num_elements;
+                virtual_positions(idx_start:idx_end, :) = positions_k;
+            end
+            
+            % 2. 时间平滑协方差矩阵估计
+            Rxx = zeros(num_virtual, num_virtual);
+            
+            for l = 1:L
+                % 第l个子阵列的快拍索引
+                sub_indices = l:(l + subarray_size - 1);
+                
+                % 构建该子阵列的虚拟信号向量
+                x_virtual = zeros(num_virtual, 1);
+                for k = 1:subarray_size
+                    snapshot_idx = sub_indices(k);
+                    idx_start = (k-1)*num_elements + 1;
+                    idx_end = k*num_elements;
+                    x_virtual(idx_start:idx_end) = snapshots(:, snapshot_idx);
+                end
+                
+                % 累加协方差矩阵
+                Rxx = Rxx + x_virtual * x_virtual';
+            end
+            Rxx = Rxx / L;
+            
+            % 3. 特征分解
+            [V, D] = eig(Rxx);
+            [eigenvalues, idx] = sort(diag(D), 'descend');
+            V = V(:, idx);
+            
+            % 噪声子空间
+            noise_dim = max(1, num_virtual - num_targets);
+            Qn = V(:, (num_targets+1):end);
+            
+            % 4. MUSIC谱搜索
+            if strcmp(search_mode, '1d')
+                spectrum = obj.music_spectrum_1d_virtual(virtual_positions, Qn, search_grid.phi);
+            else
+                spectrum = obj.music_spectrum_2d_virtual(virtual_positions, Qn, search_grid);
+            end
+            
+            % 输出信息
+            info.virtual_positions = virtual_positions;
+            info.synthetic_aperture = obj.calc_aperture(virtual_positions);
+            info.num_virtual = num_virtual;
+            info.subarray_size = subarray_size;
+            info.num_subarrays = L;
+            info.eigenvalues = eigenvalues;
+        end
+        
+        function spectrum = music_spectrum_1d_virtual(obj, positions, Qn, phi_search)
+            % 虚拟阵列1D MUSIC谱
+            num_phi = length(phi_search);
+            spectrum = zeros(1, num_phi);
+            Qn_proj = Qn * Qn';
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                u = [cosd(phi); sind(phi); 0];
+                a = obj.build_steering_vector(positions, u);
+                
+                denom = real(a' * Qn_proj * a);
+                spectrum(phi_idx) = 1 / max(denom, 1e-12);
+            end
+        end
+        
+        function spectrum = music_spectrum_2d_virtual(obj, positions, Qn, search_grid)
+            % 虚拟阵列2D MUSIC谱
+            theta_search = search_grid.theta;
+            phi_search = search_grid.phi;
+            spectrum = zeros(length(theta_search), length(phi_search));
+            Qn_proj = Qn * Qn';
+            
+            for phi_idx = 1:length(phi_search)
+                phi = phi_search(phi_idx);
+                for theta_idx = 1:length(theta_search)
+                    theta = theta_search(theta_idx);
+                    u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
+                    a = obj.build_steering_vector(positions, u);
+                    
+                    denom = real(a' * Qn_proj * a);
+                    spectrum(theta_idx, phi_idx) = 1 / max(denom, 1e-12);
+                end
+            end
+        end
+        
+        %% ═══════════════════════════════════════════════════════════════════
+        %  辅助函数
+        %% ═══════════════════════════════════════════════════════════════════
+        function a = build_steering_vector(obj, positions, u)
+            % 构建导向矢量（平面波模型）
+            %
+            % 相位 = 4π/λ × (位置·方向)，FMCW雷达双程传播
+            % 
+            % 注意：必须与信号生成器使用相同的模型！
+            % SignalGeneratorSimple 应该也使用平面波近似
+            
+            phase = 4 * pi / obj.lambda * (positions * u);
+            a = exp(1j * phase);
         end
         
         function aperture = calc_aperture(obj, positions)
@@ -351,61 +505,6 @@ classdef DoaEstimatorSynthetic
             aperture.total_lambda = aperture.total / obj.lambda;
         end
         
-        function [spectrum, peaks] = search_1d(obj, positions, Qn, phi_search, num_targets)
-            % 1D MUSIC搜索（只搜索方位角phi，假设theta=90°）
-            
-            num_phi = length(phi_search);
-            spectrum = zeros(1, num_phi);
-            Qn_proj = Qn * Qn';
-            
-            for phi_idx = 1:num_phi
-                phi = phi_search(phi_idx);
-                u = [cosd(phi); sind(phi); 0];
-                a = obj.build_steering_vector(positions, u);
-                
-                denominator = a' * Qn_proj * a;
-                spectrum(phi_idx) = 1 / abs(denominator);
-            end
-            
-            [~, peak_indices] = maxk(spectrum, num_targets);
-            peaks.phi = phi_search(peak_indices);
-            peaks.theta = 90 * ones(size(peaks.phi));
-        end
-        
-        function [spectrum, peaks] = search_2d(obj, positions, Qn, search_grid, num_targets)
-            % 2D MUSIC搜索（搜索theta和phi）
-            
-            theta_search = search_grid.theta;
-            phi_search = search_grid.phi;
-            num_theta = length(theta_search);
-            num_phi = length(phi_search);
-            
-            spectrum = zeros(num_theta, num_phi);
-            Qn_proj = Qn * Qn';
-            
-            for phi_idx = 1:num_phi
-                phi = phi_search(phi_idx);
-                for theta_idx = 1:num_theta
-                    theta = theta_search(theta_idx);
-                    
-                    u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
-                    a = obj.build_steering_vector(positions, u);
-                    
-                    denominator = a' * Qn_proj * a;
-                    spectrum(theta_idx, phi_idx) = 1 / abs(denominator);
-                end
-            end
-            
-            [peaks.theta, peaks.phi, peaks.vals] = obj.find_peaks_2d(spectrum, search_grid, num_targets);
-        end
-        
-        function a = build_steering_vector(obj, positions, u)
-            % 构建导向矢量
-            % 相位 = 4π/λ × (位置 · 方向)，FMCW雷达双程传播
-            phase = 4 * pi / obj.lambda * (positions * u);
-            a = exp(1j * phase);
-        end
-        
         function [theta_peaks, phi_peaks, peak_vals] = find_peaks_2d(obj, spectrum, search_grid, num_peaks)
             % 2D峰值查找
             [sorted_vals, sort_idx] = sort(spectrum(:), 'descend');
@@ -414,7 +513,7 @@ classdef DoaEstimatorSynthetic
             phi_peaks = zeros(1, num_peaks);
             peak_vals = zeros(1, num_peaks);
             
-            for i = 1:num_peaks
+            for i = 1:min(num_peaks, length(sorted_vals))
                 [theta_idx, phi_idx] = ind2sub(size(spectrum), sort_idx(i));
                 theta_peaks(i) = search_grid.theta(theta_idx);
                 phi_peaks(i) = search_grid.phi(phi_idx);
@@ -449,4 +548,3 @@ function val = get_opt(options, field, default)
         val = default;
     end
 end
-

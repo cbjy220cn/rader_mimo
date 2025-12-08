@@ -24,6 +24,52 @@ fprintf('║  验证：轨迹偏差对DOA估计精度的影响                  
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 fprintf('输出目录: %s\n\n', output_folder);
 
+%% ═════════════════════════════════════════════════════════════════════════════
+%  实验说明（用于论文参考）
+%% ═════════════════════════════════════════════════════════════════════════════
+fprintf('┌─────────────────────────────────────────────────────────────────┐\n');
+fprintf('│                        实验说明                                 │\n');
+fprintf('├─────────────────────────────────────────────────────────────────┤\n');
+fprintf('│ 【实验目的】                                                    │\n');
+fprintf('│   验证运动合成孔径DOA算法对平台振动的鲁棒性。                   │\n');
+fprintf('│   无人机飞行时存在振动，导致实际位置与理论轨迹存在偏差。        │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【振动模型】                                                    │\n');
+fprintf('│   实际位置 = 理论位置 + 高斯随机偏差                           │\n');
+fprintf('│   偏差 ~ N(0, σ²)，σ为振动标准差，单位为波长λ                  │\n');
+fprintf('│   各时刻偏差独立，同一时刻所有阵元偏差相同（整体振动）          │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【关键指标定义】                                                │\n');
+fprintf('│   ① RMSE (均方根误差)                                          │\n');
+fprintf('│      = sqrt(mean((估计值-真实值)²))                            │\n');
+fprintf('│      物理含义：估计精度的综合度量，越小越好                     │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ② 偏差 (Bias)                                                │\n');
+fprintf('│      = mean(估计值-真实值)                                     │\n');
+fprintf('│      物理含义：系统性偏移，反映估计是否存在系统误差             │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ③ 标准差 (Std)                                               │\n');
+fprintf('│      = std(估计值-真实值)                                      │\n');
+fprintf('│      物理含义：估计的离散程度，反映一致性                       │\n');
+fprintf('│      关系：RMSE² = Bias² + Std²                                │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ④ 成功率                                                     │\n');
+fprintf('│      = (|误差|<阈值的次数) / 总试验次数 × 100%%                 │\n');
+fprintf('│      物理含义：系统可靠性指标                                   │\n');
+fprintf('│      - 100%%: 所有情况准确，系统完全可靠                        │\n');
+fprintf('│      -  90%%: 10次有1次失败，可接受                             │\n');
+fprintf('│      -  50%%: 一半失败，临界状态                                │\n');
+fprintf('│      - <50%%: 系统不可靠                                        │\n');
+fprintf('│                                                                 │\n');
+fprintf('│   ⑤ 中位绝对误差                                               │\n');
+fprintf('│      = median(|估计值-真实值|)                                 │\n');
+fprintf('│      物理含义：对离群值鲁棒的精度指标                           │\n');
+fprintf('│                                                                 │\n');
+fprintf('│ 【实际应用参考】                                                │\n');
+fprintf('│   典型无人机振动RMS：0.1-1 cm                                  │\n');
+fprintf('│   若λ=10cm(3GHz)，则振动≈0.01-0.1λ                            │\n');
+fprintf('└─────────────────────────────────────────────────────────────────┘\n\n');
+
 %% 参数设置
 c = physconst('LightSpeed');
 fc = 3e9;
@@ -49,8 +95,10 @@ num_snapshots = 64;
 t_axis = linspace(0, T_obs, num_snapshots);
 
 % 震动参数设置（不同程度的位置偏差）
-vibration_std_range = [0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0] * lambda;  % 标准差（单位：波长）
-num_trials = 50;
+% 采样更密集，特别是0.1-0.3λ区间（临界区域）
+vibration_std_range = [0, 0.01, 0.02, 0.05, 0.08, 0.1, 0.12, 0.15, 0.2, 0.3, 0.5, 0.7, 1.0] * lambda;
+num_trials = 100;  % 增加试验次数以提高统计稳定性
+success_threshold = 5;  % 成功判定阈值（度）：误差<5°算成功
 
 fprintf('【实验设置】\n');
 fprintf('  波长: %.2f cm\n', lambda*100);
@@ -74,13 +122,16 @@ results_vibration.rmse = zeros(size(vibration_std_range));
 results_vibration.bias = zeros(size(vibration_std_range));
 results_vibration.std = zeros(size(vibration_std_range));
 results_vibration.success_rate = zeros(size(vibration_std_range));
+results_vibration.median_error = zeros(size(vibration_std_range));
+results_vibration.success_threshold = success_threshold;
 
 % 目标
 target_pos = target_range * [cosd(target_phi), sind(target_phi), 0];
 target = Target(target_pos, [0,0,0], 1);
 
-fprintf('震动标准差 | RMSE   | 偏差   | 标准差 | 成功率\n');
-fprintf('-----------|--------|--------|--------|-------\n');
+fprintf('成功判定阈值: 误差 < %d°\n\n', success_threshold);
+fprintf('震动标准差 | RMSE   | 中位误差 | 偏差   | 标准差 | 成功率\n');
+fprintf('-----------|--------|----------|--------|--------|-------\n');
 
 for vib_idx = 1:length(vibration_std_range)
     vib_std = vibration_std_range(vib_idx);
@@ -149,28 +200,56 @@ for vib_idx = 1:length(vibration_std_range)
         errors(trial) = est_phi - target_phi;
     end
     
-    % 统计
+    % 统计（改进版）
     valid_errors = errors(~isnan(errors));
-    valid_estimates = estimates(~isnan(estimates));
     
     if ~isempty(valid_errors)
-        results_vibration.rmse(vib_idx) = sqrt(mean(valid_errors.^2));
-        results_vibration.bias(vib_idx) = mean(valid_errors);
-        results_vibration.std(vib_idx) = std(valid_errors);
-        results_vibration.success_rate(vib_idx) = length(valid_errors) / num_trials * 100;
+        % 成功率：误差 < success_threshold 算成功
+        num_success = sum(abs(valid_errors) < success_threshold);
+        results_vibration.success_rate(vib_idx) = num_success / num_trials * 100;
+        
+        % RMSE（仅对成功样本计算，更有意义）
+        successful_errors = valid_errors(abs(valid_errors) < success_threshold);
+        if ~isempty(successful_errors)
+            results_vibration.rmse(vib_idx) = sqrt(mean(successful_errors.^2));
+            results_vibration.bias(vib_idx) = mean(successful_errors);
+            results_vibration.std(vib_idx) = std(successful_errors);
+        else
+            % 全部失败时用所有样本
+            results_vibration.rmse(vib_idx) = sqrt(mean(valid_errors.^2));
+            results_vibration.bias(vib_idx) = mean(valid_errors);
+            results_vibration.std(vib_idx) = std(valid_errors);
+        end
+        
+        % 额外记录：绝对误差的中位数（更鲁棒）
+        results_vibration.median_error(vib_idx) = median(abs(valid_errors));
     else
         results_vibration.rmse(vib_idx) = NaN;
         results_vibration.bias(vib_idx) = NaN;
         results_vibration.std(vib_idx) = NaN;
         results_vibration.success_rate(vib_idx) = 0;
+        results_vibration.median_error(vib_idx) = NaN;
     end
     
-    fprintf('   %.2fλ    | %5.2f° | %+5.2f° | %5.2f° | %5.1f%%\n', ...
+    fprintf('   %.2fλ    | %5.2f° |   %5.2f° | %+5.2f° | %5.2f° | %5.1f%%\n', ...
         vib_std/lambda, ...
         results_vibration.rmse(vib_idx), ...
+        results_vibration.median_error(vib_idx), ...
         results_vibration.bias(vib_idx), ...
         results_vibration.std(vib_idx), ...
         results_vibration.success_rate(vib_idx));
+end
+
+% 输出关键临界点
+fprintf('\n【临界点分析】\n');
+vib_std_lambda_tmp = vibration_std_range / lambda;
+idx_90 = find(results_vibration.success_rate >= 90, 1, 'last');
+idx_50 = find(results_vibration.success_rate >= 50, 1, 'last');
+if ~isempty(idx_90)
+    fprintf('  成功率 ≥ 90%%: 震动 ≤ %.2fλ (%.1f cm)\n', vib_std_lambda_tmp(idx_90), vibration_std_range(idx_90)*100);
+end
+if ~isempty(idx_50)
+    fprintf('  成功率 ≥ 50%%: 震动 ≤ %.2fλ (%.1f cm)\n', vib_std_lambda_tmp(idx_50), vibration_std_range(idx_50)*100);
 end
 
 %% 绘图
@@ -178,55 +257,89 @@ fprintf('\n═══════════════════════
 fprintf('生成结果图表\n');
 fprintf('═══════════════════════════════════════════════════════════════════\n\n');
 
-fig = figure('Position', [100, 100, 1200, 500], 'Color', 'white');
+fig = figure('Position', [100, 100, 1400, 500], 'Color', 'white');
 set(gcf, 'DefaultAxesFontName', 'SimHei');
 
-% 子图1: RMSE vs 震动幅度
-subplot(1, 3, 1);
 vib_std_lambda = vibration_std_range / lambda;
-plot(vib_std_lambda, results_vibration.rmse, '-o', 'LineWidth', 2, ...
-    'MarkerSize', 8, 'MarkerFaceColor', [0.2, 0.4, 0.8]);
-xlabel('震动标准差 (λ)', 'FontWeight', 'bold');
-ylabel('RMSE (°)', 'FontWeight', 'bold');
-title('(a) RMSE vs 震动幅度', 'FontWeight', 'bold');
+colors = struct('blue', [0.2, 0.4, 0.8], 'orange', [0.9, 0.5, 0.1], ...
+                'green', [0.3, 0.7, 0.4], 'red', [0.8, 0.2, 0.2]);
+
+% ===== 子图1: RMSE + 中位误差 =====
+subplot(1, 3, 1);
+plot(vib_std_lambda, results_vibration.rmse, '-o', 'LineWidth', 2.5, ...
+    'MarkerSize', 8, 'MarkerFaceColor', colors.blue, 'Color', colors.blue);
+hold on;
+plot(vib_std_lambda, results_vibration.median_error, '--s', 'LineWidth', 2, ...
+    'MarkerSize', 6, 'MarkerFaceColor', colors.orange, 'Color', colors.orange);
+
+% 1°阈值线
+yline(1, 'r:', 'LineWidth', 1.5);
+
+xlabel('震动标准差 (λ)', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('误差 (°)', 'FontWeight', 'bold', 'FontSize', 11);
+title('(a) 估计误差随震动变化', 'FontWeight', 'bold', 'FontSize', 12);
+legend({'RMSE (成功样本)', '中位绝对误差', '1°阈值'}, 'Location', 'northwest');
 grid on;
 xlim([0, max(vib_std_lambda)*1.05]);
+set(gca, 'FontSize', 10);
+hold off;
 
-% 找到RMSE < 1度的阈值
-threshold_idx = find(results_vibration.rmse > 1, 1);
-if ~isempty(threshold_idx)
-    hold on;
-    xline(vib_std_lambda(threshold_idx-1), 'r--', 'LineWidth', 1.5);
-    text(vib_std_lambda(threshold_idx-1)*1.1, max(results_vibration.rmse)*0.8, ...
-        sprintf('容许范围\n≈%.2fλ', vib_std_lambda(threshold_idx-1)), ...
-        'Color', 'r', 'FontWeight', 'bold');
-    hold off;
+% ===== 子图2: 偏差 + 标准差（同一Y轴） =====
+subplot(1, 3, 2);
+plot(vib_std_lambda, abs(results_vibration.bias), '-s', 'LineWidth', 2.5, ...
+    'MarkerSize', 7, 'MarkerFaceColor', colors.blue, 'Color', colors.blue);
+hold on;
+plot(vib_std_lambda, results_vibration.std, '-d', 'LineWidth', 2.5, ...
+    'MarkerSize', 7, 'MarkerFaceColor', colors.orange, 'Color', colors.orange);
+
+xlabel('震动标准差 (λ)', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('角度 (°)', 'FontWeight', 'bold', 'FontSize', 11);
+title('(b) 偏差与标准差', 'FontWeight', 'bold', 'FontSize', 12);
+legend({'|偏差|', '标准差'}, 'Location', 'northwest');
+grid on;
+xlim([0, max(vib_std_lambda)*1.05]);
+set(gca, 'FontSize', 10);
+hold off;
+
+% ===== 子图3: 成功率（带颜色渐变） =====
+subplot(1, 3, 3);
+bar_data = results_vibration.success_rate;
+b = bar(vib_std_lambda, bar_data, 0.7);
+
+% 根据成功率设置颜色（绿→黄→红）
+for k = 1:length(bar_data)
+    if bar_data(k) >= 90
+        bar_color = colors.green;
+    elseif bar_data(k) >= 50
+        bar_color = [0.9, 0.7, 0.2];  % 黄色
+    else
+        bar_color = colors.red;
+    end
+    % 通过patch添加颜色
+end
+b.FaceColor = 'flat';
+for k = 1:length(bar_data)
+    if bar_data(k) >= 90
+        b.CData(k,:) = colors.green;
+    elseif bar_data(k) >= 50
+        b.CData(k,:) = [0.9, 0.7, 0.2];
+    else
+        b.CData(k,:) = colors.red;
+    end
 end
 
-% 子图2: 偏差与标准差
-subplot(1, 3, 2);
-yyaxis left;
-plot(vib_std_lambda, results_vibration.bias, '-s', 'LineWidth', 2, 'MarkerSize', 8);
-ylabel('偏差 (°)');
-
-yyaxis right;
-plot(vib_std_lambda, results_vibration.std, '-d', 'LineWidth', 2, 'MarkerSize', 8);
-ylabel('标准差 (°)');
-
-xlabel('震动标准差 (λ)', 'FontWeight', 'bold');
-title('(b) 偏差与标准差', 'FontWeight', 'bold');
-legend({'偏差', '标准差'}, 'Location', 'northwest');
-grid on;
-xlim([0, max(vib_std_lambda)*1.05]);
-
-% 子图3: 成功率
-subplot(1, 3, 3);
-bar(vib_std_lambda, results_vibration.success_rate, 'FaceColor', [0.3, 0.7, 0.4]);
-xlabel('震动标准差 (λ)', 'FontWeight', 'bold');
-ylabel('成功率 (%)', 'FontWeight', 'bold');
-title('(c) 估计成功率', 'FontWeight', 'bold');
+xlabel('震动标准差 (λ)', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('成功率 (%)', 'FontWeight', 'bold', 'FontSize', 11);
+title(sprintf('(c) 估计成功率 (误差<%d°)', success_threshold), 'FontWeight', 'bold', 'FontSize', 12);
 ylim([0, 105]);
 grid on;
+set(gca, 'FontSize', 10);
+
+% 添加50%和90%参考线
+hold on;
+yline(90, 'g--', 'LineWidth', 1.2);
+yline(50, 'Color', [0.9, 0.7, 0.2], 'LineStyle', '--', 'LineWidth', 1.2);
+hold off;
 
 sgtitle('平台震动对DOA估计的影响', 'FontSize', 14, 'FontWeight', 'bold');
 
