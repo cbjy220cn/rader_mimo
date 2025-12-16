@@ -35,8 +35,9 @@ classdef SignalGeneratorSimple
             num_virtual_elements = obj.array_platform.get_num_virtual_elements();
             lambda = obj.radar_params.lambda;
             
-            % 固定随机种子以保证可重复性
-            rng(0);
+            % 注意：不再固定随机种子
+            % 随机种子应由调用者在外部控制，以保证蒙特卡洛试验的有效性
+            % 旧代码: rng(0); 这会导致所有试验的目标幅度相同，严重影响统计
             
             % 初始化输出
             snapshots = zeros(num_virtual_elements, num_snapshots);
@@ -49,6 +50,7 @@ classdef SignalGeneratorSimple
                 t = t_axis(k);
                 
                 % 获取该时刻的虚拟阵元位置（全局坐标系）
+                % 关键：位置包含运动偏移，这正是合成孔径的核心！
                 virtual_positions = obj.array_platform.get_mimo_virtual_positions(t);
                 
                 % 遍历每个目标
@@ -57,19 +59,21 @@ classdef SignalGeneratorSimple
                     target_pos = target_obj.get_position_at(t);
                     target_rcs = target_obj.rcs;
                     
-                    % 计算到每个虚拟阵元的距离
+                    % 目标方向单位矢量（从原点指向目标）
+                    % 使用原点作为固定参考点，这样运动效应才能体现！
+                    target_range = norm(target_pos);
+                    target_dir = target_pos / target_range;
+                    
+                    % 计算每个阵元的相位
                     for v = 1:num_virtual_elements
                         virt_pos = virtual_positions(v, :);
                         
-                        % 双程距离（雷达往返）
-                        range = 2 * norm(target_pos - virt_pos);
-                        
-                        % 空间相位 = 4π/λ × 单程距离
-                        % 或等效于 2π/λ × 双程距离
-                        phase = 2 * pi * range / lambda;
+                        % 相位 = 阵元位置在信号来向的投影 × 4π/λ
+                        % 远场近似：信号为平面波
+                        % 位置包含运动偏移，这样不同快拍的相位会不同
+                        phase = 4 * pi / lambda * dot(virt_pos, target_dir);
                         
                         % 信号 = 幅度 × RCS × exp(-j×相位)
-                        % 负号表示延迟导致相位滞后
                         signal = target_amplitudes(i) * sqrt(target_rcs) * exp(-1j * phase);
                         
                         snapshots(v, k) = snapshots(v, k) + signal;

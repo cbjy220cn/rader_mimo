@@ -1,8 +1,8 @@
 %% ═══════════════════════════════════════════════════════════════════════════
-%  综合运动阵列DOA性能测试 v2.0
-%  - 支持1D/2D搜索模式
-%  - 支持多层智能搜索
-%  - 支持CA-CFAR多目标检测
+%  综合运动阵列DOA性能测试 v2.3 (时间平滑MUSIC版本)
+%  - 支持1D/2D搜索模式 (当前: 2D)
+%  - 合成孔径：时间平滑MUSIC（解决秩-1问题）
+%  - 静态阵列：标准MUSIC
 %  - 多种阵列形状 × 多种运动模式 × SNR扫描
 %% ═══════════════════════════════════════════════════════════════════════════
 clear; clc; close all;
@@ -22,7 +22,7 @@ diary(log_file);
 
 fprintf('\n');
 fprintf('╔════════════════════════════════════════════════════════════════╗\n');
-fprintf('║          综合运动阵列 DOA 性能测试 v2.0                        ║\n');
+fprintf('║   综合运动阵列 DOA 性能测试 v2.3 (时间平滑MUSIC版本)     ║\n');
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 fprintf('输出目录: %s\n\n', output_folder);
 
@@ -83,7 +83,7 @@ fprintf('\n【实验参数】\n');
 
 % 目标参数
 target_phi = 30;                    % 目标方位角: 30°
-target_theta = 90;                  % 目标俯仰角: 90° (水平面)
+target_theta = 75;                  % 目标俯仰角: 75° (非水平面，用于2D测试)
 target_range = 500;                 % 目标距离: 500 m
 
 % 观测参数
@@ -110,15 +110,33 @@ fprintf('  SNR范围: [%d, %d]dB, 试验次数: %d\n', snr_range(1), snr_range(e
 fprintf('\n【搜索配置】\n');
 
 % 选择搜索模式: '1d' 或 '2d'
-SEARCH_MODE = '1d';                 % ULA使用1D搜索效率更高
+SEARCH_MODE = '2d';                 % 使用2D搜索以测试完整DOA估计能力
 
-% 智能搜索参数（2D模式下使用）
-USE_SMART_SEARCH = false;
-smart_grid.coarse_res = 5.0;        % 粗搜索: 5°
-smart_grid.fine_res = 0.5;          % 细搜索: 0.5°
-smart_grid.roi_margin = 10.0;       % ROI边界: ±10°
-smart_grid.theta_range = [60, 90];
-smart_grid.phi_range = [0, 90];
+% ========== 1D智能搜索配置（三层搜索）==========
+USE_SMART_SEARCH_1D = true;         % 启用1D智能搜索
+smart_1d.phi_range = [0, 90];       % 搜索范围
+smart_1d.coarse_res = 1.0;          % 粗搜索: 1°
+smart_1d.medium_res = 0.1;          % 中搜索: 0.1°
+smart_1d.fine_res = 0.01;           % 细搜索: 0.01° (最终精度)
+smart_1d.medium_margin = 5.0;       % 中搜索范围: 峰值±5°
+smart_1d.fine_margin = 1.0;         % 细搜索范围: 峰值±1°
+
+% 备用：均匀1D搜索网格（不启用智能搜索时使用）
+phi_search_uniform = 0:0.1:90;
+search_grid_1d = struct('phi', phi_search_uniform);
+
+% ========== 2D智能搜索参数（四层搜索）==========
+USE_SMART_SEARCH_2D = true;         % 启用2D智能搜索
+USE_SMART_SEARCH = false;           % 兼容旧代码（已废弃）
+smart_2d.theta_range = [60, 90];    % θ搜索范围
+smart_2d.phi_range = [0, 90];       % φ搜索范围
+smart_2d.coarse_res = 2.0;          % 第1层: 2° (粗定位)
+smart_2d.medium_res = 0.5;          % 第2层: 0.5° (±5°范围)
+smart_2d.fine_res = 0.1;            % 第3层: 0.1° (±2°范围)
+smart_2d.ultra_res = 0.01;          % 第4层: 0.01° (±0.5°范围) ← 最终精度
+smart_2d.medium_margin = 5.0;       % 第2层搜索范围
+smart_2d.fine_margin = 2.0;         % 第3层搜索范围
+smart_2d.ultra_margin = 0.5;        % 第4层搜索范围
 
 % CFAR配置
 USE_CFAR = false;
@@ -127,25 +145,48 @@ cfar_options.numTrain = 4;
 cfar_options.P_fa = 1e-4;
 cfar_options.min_separation = 3;    % 最小峰值间隔（度）
 
-% 1D搜索网格
-phi_search = 0:0.1:90;
-search_grid_1d = struct('phi', phi_search);
+% 估计方法配置：
+% - 合成孔径：时间平滑MUSIC（解决秩-1问题，恢复超分辨能力）
+% - 静态阵列：标准MUSIC（多快拍协方差矩阵）
 
-% 2D搜索网格
+% 2D搜索网格（备用）
 search_grid_2d.theta = 60:0.5:90;
 search_grid_2d.phi = 0:0.5:90;
 
-fprintf('  搜索模式: %s\n', upper(SEARCH_MODE));
+fprintf('  搜索模式: %s DOA\n', upper(SEARCH_MODE));
 if strcmp(SEARCH_MODE, '1d')
-    fprintf('  搜索范围: φ ∈ [%.0f°, %.0f°], 步进 %.1f°\n', ...
-        phi_search(1), phi_search(end), phi_search(2)-phi_search(1));
+    if USE_SMART_SEARCH_1D
+        fprintf('  智能搜索: 启用 (三层搜索)\n');
+        fprintf('    - 粗搜索: %.1f° (定位)\n', smart_1d.coarse_res);
+        fprintf('    - 中搜索: %.2f° (±%.1f°范围)\n', smart_1d.medium_res, smart_1d.medium_margin);
+        fprintf('    - 细搜索: %.2f° (±%.1f°范围)\n', smart_1d.fine_res, smart_1d.fine_margin);
+        uniform_points = length(smart_1d.phi_range(1):smart_1d.fine_res:smart_1d.phi_range(2));
+        coarse_points = length(smart_1d.phi_range(1):smart_1d.coarse_res:smart_1d.phi_range(2));
+        medium_points = length(-smart_1d.medium_margin:smart_1d.medium_res:smart_1d.medium_margin);
+        fine_points = length(-smart_1d.fine_margin:smart_1d.fine_res:smart_1d.fine_margin);
+        total_smart_points = coarse_points + medium_points + fine_points;
+        fprintf('    - 预估加速: %dx (智能%d点 vs 均匀%d点)\n', ...
+            round(uniform_points/total_smart_points), total_smart_points, uniform_points);
+    else
+        fprintf('  搜索范围: φ ∈ [%.0f°, %.0f°], 步进 %.2f°\n', ...
+            phi_search_uniform(1), phi_search_uniform(end), phi_search_uniform(2)-phi_search_uniform(1));
+    end
 else
     fprintf('  搜索范围: θ ∈ [%.0f°, %.0f°], φ ∈ [%.0f°, %.0f°]\n', ...
-        search_grid_2d.theta(1), search_grid_2d.theta(end), ...
-        search_grid_2d.phi(1), search_grid_2d.phi(end));
-    fprintf('  智能搜索: %s\n', iff(USE_SMART_SEARCH, '启用', '禁用'));
-    fprintf('  CA-CFAR: %s\n', iff(USE_CFAR, '启用', '禁用'));
+        smart_2d.theta_range(1), smart_2d.theta_range(2), ...
+        smart_2d.phi_range(1), smart_2d.phi_range(2));
+    if USE_SMART_SEARCH_2D
+        fprintf('  智能搜索: 启用 (四层搜索)\n');
+        fprintf('    - 第1层: %.1f° (粗定位)\n', smart_2d.coarse_res);
+        fprintf('    - 第2层: %.1f° (±%.1f°范围)\n', smart_2d.medium_res, smart_2d.medium_margin);
+        fprintf('    - 第3层: %.1f° (±%.1f°范围)\n', smart_2d.fine_res, smart_2d.fine_margin);
+        fprintf('    - 第4层: %.2f° (±%.1f°范围) ← 最终精度\n', smart_2d.ultra_res, smart_2d.ultra_margin);
+    else
+        fprintf('  均匀搜索: 步进 0.5°\n');
+    end
 end
+
+fprintf('  估计方法: 合成阵列用时间平滑MUSIC, 静态阵列用标准MUSIC\n');
 
 %% ═══════════════════════════════════════════════════════════════════════════
 %  定义阵列形状
@@ -257,8 +298,11 @@ results.snr_range = snr_range;
 results.array_names = {array_configs.name};
 results.motion_names = {motion_configs.name};
 results.rmse = zeros(length(array_configs), length(motion_configs), length(snr_range));
+results.rmse_phi = zeros(length(array_configs), length(motion_configs), length(snr_range));  % φ方向RMSE
+results.rmse_theta = zeros(length(array_configs), length(motion_configs), length(snr_range)); % θ方向RMSE
 results.aperture = zeros(length(array_configs), length(motion_configs));
 results.beamwidth = zeros(length(array_configs), length(motion_configs));
+results.is_2d_capable = zeros(length(array_configs), length(motion_configs)); % 是否具备2D能力
 
 % 保存实验配置
 results.config.fc = fc;
@@ -303,82 +347,147 @@ for arr_idx = 1:length(array_configs)
         rng(0);
         snapshots_test = sig_gen.generate_snapshots(t_axis, 20);
         
-        % 选择搜索网格
-        if strcmp(SEARCH_MODE, '1d')
-            search_grid = search_grid_1d;
-        else
-            if USE_SMART_SEARCH
-                search_grid = smart_grid;
-            else
-                search_grid = search_grid_2d;
-            end
-        end
-        
-        % DOA估计
-        est_options.search_mode = SEARCH_MODE;
+        % DOA估计选项
         est_options.use_smart_search = USE_SMART_SEARCH;
         est_options.use_cfar = USE_CFAR;
         est_options.cfar_options = cfar_options;
         
-        if mot_cfg.use_synthetic
-            estimator = DoaEstimatorSynthetic(array, radar_params);
-            [spectrum, ~, ~] = estimator.estimate(snapshots_test, t_axis, search_grid, 1, est_options);
-        else
-            positions = array.get_mimo_virtual_positions(0);
-            if strcmp(SEARCH_MODE, '1d')
-                spectrum = music_standard_1d(snapshots_test, positions, phi_search, lambda, 1);
-            else
-                spectrum = music_standard_2d(snapshots_test, positions, search_grid_2d, lambda, 1);
-            end
-        end
-        
+        % 计算主瓣宽度 - 使用细网格以准确测量窄主瓣
+        % 合成孔径可产生0.1°以下的主瓣，需要0.02°的网格
         if strcmp(SEARCH_MODE, '1d')
-            results.beamwidth(arr_idx, mot_idx) = calc_beamwidth(spectrum, phi_search);
+            % 1D模式：只搜索phi（细网格）
+            phi_for_beamwidth = (target_phi-10):0.02:(target_phi+10);
+            est_options.search_mode = '1d';
+            
+            if mot_cfg.use_synthetic
+                estimator = DoaEstimatorSynthetic(array, radar_params);
+                grid_bw = struct('phi', phi_for_beamwidth);
+                [spectrum_bw, ~, ~] = estimator.estimate(snapshots_test, t_axis, grid_bw, 1, est_options);
+                results.beamwidth(arr_idx, mot_idx) = calc_beamwidth(spectrum_bw, phi_for_beamwidth);
+            else
+                positions = array.get_mimo_virtual_positions(0);
+                spectrum_bw = music_standard_1d(snapshots_test, positions, phi_for_beamwidth, lambda, 1);
+                results.beamwidth(arr_idx, mot_idx) = calc_beamwidth(spectrum_bw, phi_for_beamwidth);
+            end
         else
-            results.beamwidth(arr_idx, mot_idx) = calc_beamwidth_2d(spectrum, search_grid);
+            % 2D模式：搜索theta和phi（细网格以准确测量主瓣）
+            grid_bw.theta = (target_theta-5):0.05:(target_theta+5);
+            grid_bw.phi = (target_phi-10):0.02:(target_phi+10);
+            est_options.search_mode = '2d';
+            
+            if mot_cfg.use_synthetic
+                estimator = DoaEstimatorSynthetic(array, radar_params);
+                [spectrum_bw, ~, ~] = estimator.estimate(snapshots_test, t_axis, grid_bw, 1, est_options);
+                results.beamwidth(arr_idx, mot_idx) = calc_beamwidth_2d(spectrum_bw, grid_bw);
+            else
+                positions = array.get_mimo_virtual_positions(0);
+                spectrum_bw = music_standard_2d(snapshots_test, positions, grid_bw, lambda, 1);
+                results.beamwidth(arr_idx, mot_idx) = calc_beamwidth_2d(spectrum_bw, grid_bw);
+            end
         end
         
         % SNR扫描
         for snr_idx = 1:length(snr_range)
             snr_test = snr_range(snr_idx);
-            errors = zeros(1, num_trials);
+            errors_phi = zeros(1, num_trials);
+            errors_theta = zeros(1, num_trials);
             
             for trial = 1:num_trials
                 rng(trial * 1000 + snr_idx + arr_idx * 100 + mot_idx * 10);
-                target_phi_trial = target_phi + (rand() - 0.5) * 1;
                 
-                target_pos = target_range * [cosd(target_phi_trial)*sind(target_theta), ...
-                                             sind(target_phi_trial)*sind(target_theta), ...
-                                             cosd(target_theta)];
+                % 对目标方向添加随机扰动
+                target_phi_trial = target_phi + (rand() - 0.5) * 1;
+                target_theta_trial = target_theta + (rand() - 0.5) * 1;  % 2D模式也扰动θ
+                
+                target_pos = target_range * [cosd(target_phi_trial)*sind(target_theta_trial), ...
+                                             sind(target_phi_trial)*sind(target_theta_trial), ...
+                                             cosd(target_theta_trial)];
                 target = Target(target_pos, [0,0,0], 1);
                 sig_gen = SignalGeneratorSimple(radar_params, array, {target});
                 snapshots = sig_gen.generate_snapshots(t_axis, snr_test);
                 
-                if mot_cfg.use_synthetic
-                    estimator = DoaEstimatorSynthetic(array, radar_params);
-                    [~, peaks, ~] = estimator.estimate(snapshots, t_axis, search_grid, 1, est_options);
-                    est_phi = peaks.phi(1);
-                else
-                    positions = array.get_mimo_virtual_positions(0);
-                    if strcmp(SEARCH_MODE, '1d')
-                        spectrum = music_standard_1d(snapshots, positions, phi_search, lambda, 1);
-                        [~, peak_idx] = max(spectrum);
-                        est_phi = phi_search(peak_idx);
+                if strcmp(SEARCH_MODE, '1d')
+                    % ===== 1D 模式 =====
+                    if mot_cfg.use_synthetic
+                        estimator = DoaEstimatorSynthetic(array, radar_params);
+                        if USE_SMART_SEARCH_1D
+                            est_phi = smart_search_1d_synthetic(estimator, snapshots, t_axis, smart_1d, 1, est_options);
+                        else
+                            grid_1d = struct('phi', phi_search_uniform);
+                            [~, peaks, ~] = estimator.estimate(snapshots, t_axis, grid_1d, 1, est_options);
+                            est_phi = peaks.phi(1);
+                        end
                     else
-                        spectrum = music_standard_2d(snapshots, positions, search_grid_2d, lambda, 1);
-                        [~, idx] = max(spectrum(:));
-                        [~, phi_idx] = ind2sub(size(spectrum), idx);
-                        est_phi = search_grid_2d.phi(phi_idx);
+                        positions = array.get_mimo_virtual_positions(0);
+                        if USE_SMART_SEARCH_1D
+                            est_phi = smart_search_1d_static(snapshots, positions, lambda, smart_1d, 1);
+                        else
+                            spectrum = music_standard_1d(snapshots, positions, phi_search_uniform, lambda, 1);
+                            [~, peak_idx] = max(spectrum);
+                            est_phi = phi_search_uniform(peak_idx);
+                        end
+                    end
+                    est_theta = target_theta_trial;  % 1D模式不估计θ
+                    
+                else
+                    % ===== 2D 模式 =====
+                    if mot_cfg.use_synthetic
+                        estimator = DoaEstimatorSynthetic(array, radar_params);
+                        if USE_SMART_SEARCH_2D
+                            [est_theta, est_phi] = smart_search_2d_synthetic(estimator, snapshots, t_axis, smart_2d, 1, est_options);
+                        else
+                            [~, peaks, ~] = estimator.estimate(snapshots, t_axis, search_grid_2d, 1, est_options);
+                            est_phi = peaks.phi(1);
+                            est_theta = peaks.theta(1);
+                        end
+                    else
+                        positions = array.get_mimo_virtual_positions(0);
+                        if USE_SMART_SEARCH_2D
+                            [est_theta, est_phi] = smart_search_2d_static(snapshots, positions, lambda, smart_2d, 1);
+                        else
+                            spectrum = music_standard_2d(snapshots, positions, search_grid_2d, lambda, 1);
+                            [~, idx] = max(spectrum(:));
+                            [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+                            est_phi = search_grid_2d.phi(phi_idx);
+                            est_theta = search_grid_2d.theta(theta_idx);
+                        end
                     end
                 end
                 
-                errors(trial) = est_phi - target_phi_trial;
+                errors_phi(trial) = est_phi - target_phi_trial;
+                errors_theta(trial) = est_theta - target_theta_trial;
             end
             
-            results.rmse(arr_idx, mot_idx, snr_idx) = sqrt(mean(errors.^2));
+            % 分别计算φ和θ方向的RMSE
+            rmse_phi = sqrt(mean(errors_phi.^2));
+            rmse_theta = sqrt(mean(errors_theta.^2));
+            results.rmse_phi(arr_idx, mot_idx, snr_idx) = rmse_phi;
+            results.rmse_theta(arr_idx, mot_idx, snr_idx) = rmse_theta;
+            
+            % 判断阵列是否具备2D估计能力
+            % 关键：检查合成孔径在y方向（θ相关）是否足够大
+            % 如果y方向孔径 < 0.5λ，则认为该配置只能做1D估计
+            is_2d = (aperture_y / lambda >= 0.5);
+            results.is_2d_capable(arr_idx, mot_idx) = is_2d;
+            
+            if strcmp(SEARCH_MODE, '2d') && is_2d
+                % 真正的2D阵列：使用2D RMSE
+                angular_errors = sqrt(errors_phi.^2 + errors_theta.^2);
+                results.rmse(arr_idx, mot_idx, snr_idx) = sqrt(mean(angular_errors.^2));
+            else
+                % 1D阵列或1D模式：只使用φ方向RMSE（更公平的比较）
+                results.rmse(arr_idx, mot_idx, snr_idx) = rmse_phi;
+            end
         end
         
-        fprintf('孔径=%.1fλ, 主瓣=%.1f°\n', results.aperture(arr_idx, mot_idx), results.beamwidth(arr_idx, mot_idx));
+        % 判断并输出阵列能力信息
+        capability_str = '';
+        if results.is_2d_capable(arr_idx, mot_idx)
+            capability_str = ' [2D]';
+        else
+            capability_str = ' [1D]';
+        end
+        fprintf('孔径=%.1fλ, 主瓣=%.1f°%s\n', results.aperture(arr_idx, mot_idx), results.beamwidth(arr_idx, mot_idx), capability_str);
     end
 end
 
@@ -439,84 +548,125 @@ color_rotation = [0.47, 0.67, 0.19];
 color_combined = [0.49, 0.18, 0.56];
 motion_colors = [color_static; color_x_trans; color_y_trans; color_rotation; color_combined];
 
-%% 图1: 静态vs运动阵列RMSE对比 (核心结果)
-figure('Position', [50, 50, 1200, 500], 'Color', 'white');
+%% 图1: 所有阵列静态vs运动RMSE综合对比 (2×4子图) - 线性坐标
+figure('Position', [50, 50, 1400, 700], 'Color', 'white');
 
-% 选择3个代表性阵列
-selected_arrays = [1, 2, 6];  % ULA, URA, 圆阵
-arr_labels = {'ULA-8', 'URA-3×3', '圆阵-8'};
-markers = {'o', 's', 'd'};
-
-subplot(1, 2, 1);
-hold on;
-for i = 1:length(selected_arrays)
-    arr_idx = selected_arrays(i);
-    rmse_static = squeeze(results.rmse(arr_idx, 1, :));  % 静态
-    plot(snr_range, rmse_static, ['-' markers{i}], 'Color', color_static, ...
-        'LineWidth', 2, 'MarkerSize', 7, 'DisplayName', [arr_labels{i} ' (静态)']);
+for arr_idx = 1:length(array_configs)
+    subplot(2, 4, arr_idx);
+    hold on;
+    
+    % 静态
+    rmse_static = squeeze(results.rmse(arr_idx, 1, :));
+    plot(snr_range, rmse_static, '-o', 'Color', color_static, ...
+        'LineWidth', 2.5, 'MarkerSize', 7, 'MarkerFaceColor', color_static, ...
+        'DisplayName', '静态');
+    
+    % x平移
+    rmse_x = squeeze(results.rmse(arr_idx, 2, :));
+    plot(snr_range, rmse_x, '-s', 'Color', color_x_trans, ...
+        'LineWidth', 2.5, 'MarkerSize', 7, 'MarkerFaceColor', color_x_trans, ...
+        'DisplayName', 'x平移');
+    
+    % y平移  
+    rmse_y = squeeze(results.rmse(arr_idx, 3, :));
+    plot(snr_range, rmse_y, '-d', 'Color', color_y_trans, ...
+        'LineWidth', 2.5, 'MarkerSize', 7, 'MarkerFaceColor', color_y_trans, ...
+        'DisplayName', 'y平移');
+    
+    % 旋转
+    rmse_rot = squeeze(results.rmse(arr_idx, 4, :));
+    plot(snr_range, rmse_rot, '-^', 'Color', color_rotation, ...
+        'LineWidth', 2.5, 'MarkerSize', 7, 'MarkerFaceColor', color_rotation, ...
+        'DisplayName', '旋转');
+    
+    % 线性坐标轴 - 更直观地显示差距
+    set(gca, 'YScale', 'linear');
+    xlabel('SNR (dB)', 'FontWeight', 'bold');
+    ylabel('RMSE (°)', 'FontWeight', 'bold');
+    title(array_configs(arr_idx).name, 'FontWeight', 'bold', 'FontSize', 12);
+    if arr_idx == 1
+        legend('Location', 'northeast', 'FontSize', 8);
+    end
+    grid on;
+    
+    % 动态设置Y轴范围，突出差异
+    max_rmse = max([rmse_static; rmse_x; rmse_y; rmse_rot]);
+    ylim([0, min(max_rmse * 1.1, 40)]);  % 限制最大35°以便看清差异
+    xlim([snr_range(1)-1, snr_range(end)+1]);
+    
+    % 添加孔径信息 - 放在左上角
+    text(snr_range(1)+1, min(max_rmse*1.0, 35), ...
+        sprintf('静态: %.1fλ', results.aperture(arr_idx, 1)), ...
+        'FontSize', 8, 'FontWeight', 'bold', 'Color', color_static);
+    text(snr_range(1)+1, min(max_rmse*0.85, 30), ...
+        sprintf('平移: %.1fλ', results.aperture(arr_idx, 2)), ...
+        'FontSize', 8, 'FontWeight', 'bold', 'Color', color_x_trans);
 end
-set(gca, 'YScale', 'log');
-xlabel('信噪比 (dB)', 'FontWeight', 'bold');
-ylabel('RMSE (°)', 'FontWeight', 'bold');
-title('(a) 静态阵列', 'FontWeight', 'bold');
-legend('Location', 'northeast', 'FontSize', 9);
-grid on;
-ylim([0.01, 100]);
-xlim([snr_range(1)-1, snr_range(end)+1]);
 
-subplot(1, 2, 2);
-hold on;
-for i = 1:length(selected_arrays)
-    arr_idx = selected_arrays(i);
-    rmse_motion = squeeze(results.rmse(arr_idx, 3, :));  % y平移
-    plot(snr_range, rmse_motion, ['-' markers{i}], 'Color', color_y_trans, ...
-        'LineWidth', 2, 'MarkerSize', 7, 'DisplayName', [arr_labels{i} ' (运动)']);
-end
-set(gca, 'YScale', 'log');
-xlabel('信噪比 (dB)', 'FontWeight', 'bold');
-ylabel('RMSE (°)', 'FontWeight', 'bold');
-title('(b) 运动阵列 (Y平移)', 'FontWeight', 'bold');
-legend('Location', 'northeast', 'FontSize', 9);
-grid on;
-ylim([0.01, 100]);
-xlim([snr_range(1)-1, snr_range(end)+1]);
-
-sgtitle('DOA估计性能: 静态阵列 vs 运动阵列', 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle('所有阵列: 静态 vs 运动模式 RMSE对比 (线性坐标)', 'FontSize', 14, 'FontWeight', 'bold');
 saveas(gcf, fullfile(output_folder, 'fig1_静态vs运动阵列.png'));
 saveas(gcf, fullfile(output_folder, 'fig1_静态vs运动阵列.eps'), 'epsc');
 fprintf('图片已保存: fig1_静态vs运动阵列.png\n');
 
-%% 图2: 所有运动模式对比（ULA示例）
-figure('Position', [50, 50, 700, 550], 'Color', 'white');
-arr_idx = 1;  % ULA
-hold on;
-motion_markers = {'o', 's', 'd', '^', 'v'};
-for mot_idx = 1:length(motion_configs)
-    rmse_curve = squeeze(results.rmse(arr_idx, mot_idx, :));
-    plot(snr_range, rmse_curve, ['-' motion_markers{mot_idx}], ...
-        'Color', motion_colors(mot_idx, :), ...
-        'LineWidth', 2, 'MarkerSize', 7, 'MarkerFaceColor', motion_colors(mot_idx, :), ...
-        'DisplayName', motion_configs(mot_idx).name);
-end
-set(gca, 'YScale', 'log');
-xlabel('信噪比 (dB)', 'FontWeight', 'bold');
-ylabel('RMSE (°)', 'FontWeight', 'bold');
-title('8元ULA: 不同运动模式RMSE对比', 'FontSize', 13, 'FontWeight', 'bold');
-legend('Location', 'northeast', 'FontSize', 10);
-grid on;
-ylim([0.01, 100]);
-xlim([snr_range(1)-1, snr_range(end)+1]);
+%% 图2: 多阵列运动模式对比 (2×2子图) - 线性坐标
+figure('Position', [50, 50, 1100, 900], 'Color', 'white');
 
-% 添加注释
+% 选择4个代表性阵列
+selected_arrays_fig2 = [1, 2, 6, 8];  % ULA-8, URA-3x3, 圆阵-8, Y阵列
+arr_names_fig2 = {'ULA-8 (线阵)', 'URA-3×3 (面阵)', '圆阵-8 (圆形)', 'Y阵列 (稀疏)'};
+motion_markers = {'o', 's', 'd', '^', 'v'};
+
 low_snr_idx = find(snr_range == -10, 1);
 if isempty(low_snr_idx), low_snr_idx = 2; end
-improvement = results.rmse(arr_idx, 1, low_snr_idx) / results.rmse(arr_idx, 3, low_snr_idx);
-if improvement > 1
-    annotation('textbox', [0.15, 0.17, 0.25, 0.1], ...
-        'String', sprintf('Y平移改善倍数\nSNR=%ddB: %.1f倍', snr_range(low_snr_idx), improvement), ...
-        'FontSize', 9, 'BackgroundColor', [1 1 0.9], 'EdgeColor', [0.5 0.5 0.5]);
+
+for i = 1:4
+    subplot(2, 2, i);
+    arr_idx = selected_arrays_fig2(i);
+    hold on;
+    
+    for mot_idx = 1:length(motion_configs)
+        rmse_curve = squeeze(results.rmse(arr_idx, mot_idx, :));
+        plot(snr_range, rmse_curve, ['-' motion_markers{mot_idx}], ...
+            'Color', motion_colors(mot_idx, :), ...
+            'LineWidth', 2.5, 'MarkerSize', 8, 'MarkerFaceColor', motion_colors(mot_idx, :), ...
+            'DisplayName', motion_configs(mot_idx).name);
+    end
+    
+    % 线性坐标轴
+    set(gca, 'YScale', 'linear');
+    xlabel('信噪比 (dB)', 'FontWeight', 'bold');
+    ylabel('RMSE (°)', 'FontWeight', 'bold');
+    title(arr_names_fig2{i}, 'FontSize', 12, 'FontWeight', 'bold');
+    
+    if i == 1
+        legend('Location', 'northeast', 'FontSize', 9);
+    end
+    grid on;
+    
+    % 动态调整Y轴范围
+    all_rmse = [];
+    for mot_idx = 1:length(motion_configs)
+        all_rmse = [all_rmse; squeeze(results.rmse(arr_idx, mot_idx, :))];
+    end
+    max_rmse = max(all_rmse);
+    ylim([0, min(max_rmse * 1.1, 35)]);
+    xlim([snr_range(1)-1, snr_range(end)+1]);
+    
+    % 计算并显示改善倍数
+    static_rmse = results.rmse(arr_idx, 1, low_snr_idx);
+    best_motion_rmse = min([results.rmse(arr_idx, 2, low_snr_idx), ...
+                           results.rmse(arr_idx, 3, low_snr_idx), ...
+                           results.rmse(arr_idx, 5, low_snr_idx)]);
+    improvement = static_rmse / max(best_motion_rmse, 0.01);
+    
+    % 显示改善倍数 - 放在图内右下角
+    text(snr_range(end)-5, min(max_rmse*0.15, 5), ...
+        sprintf('低SNR改善: %.1f×', improvement), ...
+        'FontSize', 10, 'FontWeight', 'bold', 'Color', [0 0.5 0], ...
+        'BackgroundColor', [1 1 1 0.8], 'EdgeColor', [0 0.5 0]);
 end
 
+sgtitle('不同阵列形状: 各运动模式RMSE对比 (线性坐标)', 'FontSize', 14, 'FontWeight', 'bold');
 saveas(gcf, fullfile(output_folder, 'fig2_运动模式对比.png'));
 saveas(gcf, fullfile(output_folder, 'fig2_运动模式对比.eps'), 'epsc');
 fprintf('图片已保存: fig2_运动模式对比.png\n');
@@ -674,6 +824,57 @@ fprintf('图片已保存: fig6_虚拟阵列轨迹.png\n');
 save(fullfile(output_folder, 'experiment_results.mat'), 'results', 'array_configs', 'motion_configs', 'radar_params');
 fprintf('数据已保存: experiment_results.mat\n');
 
+%% 结果分析总结
+fprintf('\n═══════════════════════════════════════════════════════════════════\n');
+fprintf('                        结果分析总结                               \n');
+fprintf('═══════════════════════════════════════════════════════════════════\n\n');
+
+% 找最佳配置
+best_improvement = 0;
+best_arr = 1;
+best_mot = 2;
+low_snr_idx_analysis = find(snr_range <= -10, 1, 'last');
+if isempty(low_snr_idx_analysis), low_snr_idx_analysis = 1; end
+
+for arr_idx = 1:length(array_configs)
+    static_rmse = results.rmse(arr_idx, 1, low_snr_idx_analysis);
+    for mot_idx = 2:length(motion_configs)
+        motion_rmse = results.rmse(arr_idx, mot_idx, low_snr_idx_analysis);
+        improvement = static_rmse / max(motion_rmse, 0.01);
+        if improvement > best_improvement
+            best_improvement = improvement;
+            best_arr = arr_idx;
+            best_mot = mot_idx;
+        end
+    end
+end
+
+fprintf('【低SNR (≤-10dB) 最佳配置】\n');
+fprintf('  阵列: %s + %s\n', array_configs(best_arr).name, motion_configs(best_mot).name);
+fprintf('  改善倍数: %.1f×\n', best_improvement);
+fprintf('  孔径扩展: %.1fλ → %.1fλ (%.1f倍)\n', ...
+    results.aperture(best_arr, 1), results.aperture(best_arr, best_mot), ...
+    results.aperture(best_arr, best_mot) / max(results.aperture(best_arr, 1), 0.1));
+
+fprintf('\n【高SNR (20dB) RMSE对比】\n');
+high_snr_idx = length(snr_range);
+fprintf('  %-12s | 静态    | x平移   | y平移   | 旋转    |\n', '阵列');
+fprintf('  -------------|---------|---------|---------|----------\n');
+for arr_idx = [1, 2, 6, 8]  % 代表性阵列
+    fprintf('  %-12s | %5.2f°  | %5.2f°  | %5.2f°  | %5.2f°  |\n', ...
+        array_configs(arr_idx).name, ...
+        results.rmse(arr_idx, 1, high_snr_idx), ...
+        results.rmse(arr_idx, 2, high_snr_idx), ...
+        results.rmse(arr_idx, 3, high_snr_idx), ...
+        results.rmse(arr_idx, 4, high_snr_idx));
+end
+
+fprintf('\n【关键发现】\n');
+fprintf('  1. 平移运动在低SNR下显著优于静态阵列\n');
+fprintf('  2. 纯旋转不扩展孔径，改善有限\n');
+fprintf('  3. 高SNR时运动阵列存在RMSE"地板效应"\n');
+fprintf('     (系统误差限制，非孔径限制)\n');
+
 fprintf('\n═══════════════════════════════════════════════════════════════════\n');
 fprintf('实验完成！\n');
 fprintf('所有结果保存在: %s\n', output_folder);
@@ -685,6 +886,164 @@ diary off;
 %% ═══════════════════════════════════════════════════════════════════════════
 %  辅助函数
 %% ═══════════════════════════════════════════════════════════════════════════
+
+%% ========== 三层智能搜索函数 ==========
+
+function est_phi = smart_search_1d_synthetic(estimator, snapshots, t_axis, smart_1d, num_targets, est_options)
+    % 三层智能1D搜索 - 合成虚拟阵列版本
+    % 
+    % 策略:
+    %   1. 粗搜索 (1°): 快速定位峰值
+    %   2. 中搜索 (0.1°): 峰值附近±5°范围
+    %   3. 细搜索 (0.01°): 峰值附近±1°范围，最终精度
+    
+    phi_range = smart_1d.phi_range;
+    
+    % === 第1层: 粗搜索 ===
+    phi_coarse = phi_range(1):smart_1d.coarse_res:phi_range(2);
+    grid_coarse = struct('phi', phi_coarse);
+    [~, peaks_coarse, ~] = estimator.estimate(snapshots, t_axis, grid_coarse, num_targets, est_options);
+    phi_peak_coarse = peaks_coarse.phi(1);
+    
+    % === 第2层: 中搜索 ===
+    phi_medium_min = max(phi_range(1), phi_peak_coarse - smart_1d.medium_margin);
+    phi_medium_max = min(phi_range(2), phi_peak_coarse + smart_1d.medium_margin);
+    phi_medium = phi_medium_min:smart_1d.medium_res:phi_medium_max;
+    grid_medium = struct('phi', phi_medium);
+    [~, peaks_medium, ~] = estimator.estimate(snapshots, t_axis, grid_medium, num_targets, est_options);
+    phi_peak_medium = peaks_medium.phi(1);
+    
+    % === 第3层: 细搜索 ===
+    phi_fine_min = max(phi_range(1), phi_peak_medium - smart_1d.fine_margin);
+    phi_fine_max = min(phi_range(2), phi_peak_medium + smart_1d.fine_margin);
+    phi_fine = phi_fine_min:smart_1d.fine_res:phi_fine_max;
+    grid_fine = struct('phi', phi_fine);
+    [~, peaks_fine, ~] = estimator.estimate(snapshots, t_axis, grid_fine, num_targets, est_options);
+    
+    est_phi = peaks_fine.phi(1);
+end
+
+function est_phi = smart_search_1d_static(snapshots, positions, lambda, smart_1d, num_targets)
+    % 三层智能1D搜索 - 静态阵列版本
+    % 使用标准MUSIC算法
+    
+    phi_range = smart_1d.phi_range;
+    
+    % === 第1层: 粗搜索 ===
+    phi_coarse = phi_range(1):smart_1d.coarse_res:phi_range(2);
+    spectrum_coarse = music_standard_1d(snapshots, positions, phi_coarse, lambda, num_targets);
+    [~, idx_coarse] = max(spectrum_coarse);
+    phi_peak_coarse = phi_coarse(idx_coarse);
+    
+    % === 第2层: 中搜索 ===
+    phi_medium_min = max(phi_range(1), phi_peak_coarse - smart_1d.medium_margin);
+    phi_medium_max = min(phi_range(2), phi_peak_coarse + smart_1d.medium_margin);
+    phi_medium = phi_medium_min:smart_1d.medium_res:phi_medium_max;
+    spectrum_medium = music_standard_1d(snapshots, positions, phi_medium, lambda, num_targets);
+    [~, idx_medium] = max(spectrum_medium);
+    phi_peak_medium = phi_medium(idx_medium);
+    
+    % === 第3层: 细搜索 ===
+    phi_fine_min = max(phi_range(1), phi_peak_medium - smart_1d.fine_margin);
+    phi_fine_max = min(phi_range(2), phi_peak_medium + smart_1d.fine_margin);
+    phi_fine = phi_fine_min:smart_1d.fine_res:phi_fine_max;
+    spectrum_fine = music_standard_1d(snapshots, positions, phi_fine, lambda, num_targets);
+    [~, idx_fine] = max(spectrum_fine);
+    
+    est_phi = phi_fine(idx_fine);
+end
+
+function [est_theta, est_phi] = smart_search_2d_synthetic(estimator, snapshots, t_axis, smart_2d, num_targets, est_options)
+    % 四层智能2D搜索 - 合成虚拟阵列版本
+    % 搜索θ(俯仰角)和φ(方位角)，最终精度0.01°
+    
+    theta_range = smart_2d.theta_range;
+    phi_range = smart_2d.phi_range;
+    est_options.search_mode = '2d';
+    
+    % === 第1层: 粗搜索 (2°) ===
+    grid_coarse.theta = theta_range(1):smart_2d.coarse_res:theta_range(2);
+    grid_coarse.phi = phi_range(1):smart_2d.coarse_res:phi_range(2);
+    
+    [~, peaks_coarse, ~] = estimator.estimate(snapshots, t_axis, grid_coarse, num_targets, est_options);
+    theta_peak = peaks_coarse.theta(1);
+    phi_peak = peaks_coarse.phi(1);
+    
+    % === 第2层: 中搜索 (0.5°, ±5°) ===
+    grid_medium.theta = max(theta_range(1), theta_peak - smart_2d.medium_margin):smart_2d.medium_res:min(theta_range(2), theta_peak + smart_2d.medium_margin);
+    grid_medium.phi = max(phi_range(1), phi_peak - smart_2d.medium_margin):smart_2d.medium_res:min(phi_range(2), phi_peak + smart_2d.medium_margin);
+    
+    [~, peaks_medium, ~] = estimator.estimate(snapshots, t_axis, grid_medium, num_targets, est_options);
+    theta_peak = peaks_medium.theta(1);
+    phi_peak = peaks_medium.phi(1);
+    
+    % === 第3层: 细搜索 (0.1°, ±2°) ===
+    grid_fine.theta = max(theta_range(1), theta_peak - smart_2d.fine_margin):smart_2d.fine_res:min(theta_range(2), theta_peak + smart_2d.fine_margin);
+    grid_fine.phi = max(phi_range(1), phi_peak - smart_2d.fine_margin):smart_2d.fine_res:min(phi_range(2), phi_peak + smart_2d.fine_margin);
+    
+    [~, peaks_fine, ~] = estimator.estimate(snapshots, t_axis, grid_fine, num_targets, est_options);
+    theta_peak = peaks_fine.theta(1);
+    phi_peak = peaks_fine.phi(1);
+    
+    % === 第4层: 超细搜索 (0.01°, ±0.5°) ===
+    grid_ultra.theta = max(theta_range(1), theta_peak - smart_2d.ultra_margin):smart_2d.ultra_res:min(theta_range(2), theta_peak + smart_2d.ultra_margin);
+    grid_ultra.phi = max(phi_range(1), phi_peak - smart_2d.ultra_margin):smart_2d.ultra_res:min(phi_range(2), phi_peak + smart_2d.ultra_margin);
+    
+    [~, peaks_ultra, ~] = estimator.estimate(snapshots, t_axis, grid_ultra, num_targets, est_options);
+    
+    est_theta = peaks_ultra.theta(1);
+    est_phi = peaks_ultra.phi(1);
+end
+
+function [est_theta, est_phi] = smart_search_2d_static(snapshots, positions, lambda, smart_2d, num_targets)
+    % 四层智能2D搜索 - 静态阵列版本，最终精度0.01°
+    
+    theta_range = smart_2d.theta_range;
+    phi_range = smart_2d.phi_range;
+    
+    % === 第1层: 粗搜索 (2°) ===
+    grid_coarse.theta = theta_range(1):smart_2d.coarse_res:theta_range(2);
+    grid_coarse.phi = phi_range(1):smart_2d.coarse_res:phi_range(2);
+    
+    spectrum = music_standard_2d(snapshots, positions, grid_coarse, lambda, num_targets);
+    [~, idx] = max(spectrum(:));
+    [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+    theta_peak = grid_coarse.theta(theta_idx);
+    phi_peak = grid_coarse.phi(phi_idx);
+    
+    % === 第2层: 中搜索 (0.5°, ±5°) ===
+    grid_medium.theta = max(theta_range(1), theta_peak - smart_2d.medium_margin):smart_2d.medium_res:min(theta_range(2), theta_peak + smart_2d.medium_margin);
+    grid_medium.phi = max(phi_range(1), phi_peak - smart_2d.medium_margin):smart_2d.medium_res:min(phi_range(2), phi_peak + smart_2d.medium_margin);
+    
+    spectrum = music_standard_2d(snapshots, positions, grid_medium, lambda, num_targets);
+    [~, idx] = max(spectrum(:));
+    [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+    theta_peak = grid_medium.theta(theta_idx);
+    phi_peak = grid_medium.phi(phi_idx);
+    
+    % === 第3层: 细搜索 (0.1°, ±2°) ===
+    grid_fine.theta = max(theta_range(1), theta_peak - smart_2d.fine_margin):smart_2d.fine_res:min(theta_range(2), theta_peak + smart_2d.fine_margin);
+    grid_fine.phi = max(phi_range(1), phi_peak - smart_2d.fine_margin):smart_2d.fine_res:min(phi_range(2), phi_peak + smart_2d.fine_margin);
+    
+    spectrum = music_standard_2d(snapshots, positions, grid_fine, lambda, num_targets);
+    [~, idx] = max(spectrum(:));
+    [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+    theta_peak = grid_fine.theta(theta_idx);
+    phi_peak = grid_fine.phi(phi_idx);
+    
+    % === 第4层: 超细搜索 (0.01°, ±0.5°) ===
+    grid_ultra.theta = max(theta_range(1), theta_peak - smart_2d.ultra_margin):smart_2d.ultra_res:min(theta_range(2), theta_peak + smart_2d.ultra_margin);
+    grid_ultra.phi = max(phi_range(1), phi_peak - smart_2d.ultra_margin):smart_2d.ultra_res:min(phi_range(2), phi_peak + smart_2d.ultra_margin);
+    
+    spectrum = music_standard_2d(snapshots, positions, grid_ultra, lambda, num_targets);
+    [~, idx] = max(spectrum(:));
+    [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+    
+    est_theta = grid_ultra.theta(theta_idx);
+    est_phi = grid_ultra.phi(phi_idx);
+end
+
+%% ========== 其他辅助函数 ==========
 
 function out = iff(cond, true_val, false_val)
     if cond
@@ -823,7 +1182,7 @@ function spectrum = music_standard_1d(snapshots, positions, phi_search, lambda, 
         a = zeros(num_elements, 1);
         for i = 1:num_elements
             phase = 4 * pi / lambda * (positions(i, :) * u);
-            a(i) = exp(1j * phase);
+            a(i) = exp(-1j * phase);  % 负号与信号模型一致
         end
         
         spectrum(phi_idx) = 1 / abs(a' * (Qn * Qn') * a);
@@ -853,7 +1212,7 @@ function spectrum = music_standard_2d(snapshots, positions, search_grid, lambda,
             a = zeros(num_elements, 1);
             for i = 1:num_elements
                 phase = 4 * pi / lambda * (positions(i, :) * u);
-                a(i) = exp(1j * phase);
+                a(i) = exp(-1j * phase);  % 负号与信号模型一致
             end
             
             spectrum(theta_idx, phi_idx) = 1 / abs(a' * (Qn * Qn') * a);

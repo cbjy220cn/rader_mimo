@@ -129,31 +129,89 @@ classdef DoaEstimatorSynthetic
             % 2. 计算合成孔径
             aperture = obj.calc_aperture(virtual_positions);
             
-            % 3. 构建协方差矩阵并特征分解
-            Rxx = virtual_signals * virtual_signals';
-            [V, D] = eig(Rxx);
-            [eigenvalues, idx] = sort(diag(D), 'descend');
-            V = V(:, idx);
+            % 3. 选择估计方法
+            % 注意：合成虚拟阵列是单快拍数据，协方差矩阵是秩-1的
+            % MUSIC算法不适用！改用波束形成(Beamforming)方法
+            USE_BEAMFORMING = true;  % 使用波束形成代替MUSIC
             
-            % 确保噪声子空间维度正确
-            noise_dim = num_virtual - num_targets;
-            if noise_dim < 1
-                warning('虚拟阵元数(%d)不足以分辨%d个目标', num_virtual, num_targets);
-                noise_dim = 1;
-            end
-            Qn = V(:, (num_targets+1):end);
-            
-            % 4. 执行搜索
-            if use_smart_search
-                % 多层智能搜索
-                [spectrum, search_grid_out] = obj.smart_search(virtual_positions, Qn, search_grid, num_targets, options);
-                search_grid = search_grid_out;
-            else
-                % 常规搜索
-                if strcmp(search_mode, '1d')
-                    [spectrum, ~] = obj.search_1d(virtual_positions, Qn, search_grid.phi, num_targets);
+            if ~USE_BEAMFORMING
+                % 原始MUSIC方法（仅用于对比，不推荐）
+                Rxx = virtual_signals * virtual_signals';
+                [V, D] = eig(Rxx);
+                [eigenvalues, idx] = sort(diag(D), 'descend');
+                V = V(:, idx);
+                noise_dim = num_virtual - num_targets;
+                if noise_dim < 1
+                    noise_dim = 1;
+                end
+                Qn = V(:, (num_targets+1):end);
+                
+                if use_smart_search
+                    [spectrum, search_grid_out] = obj.smart_search(virtual_positions, Qn, search_grid, num_targets, options);
+                    search_grid = search_grid_out;
                 else
-                    [spectrum, ~] = obj.search_2d(virtual_positions, Qn, search_grid, num_targets);
+                    if strcmp(search_mode, '1d')
+                        [spectrum, ~] = obj.search_1d(virtual_positions, Qn, search_grid.phi, num_targets);
+                    else
+                        [spectrum, ~] = obj.search_2d(virtual_positions, Qn, search_grid, num_targets);
+                    end
+                end
+            else
+                % ===== 时间平滑MUSIC（推荐）=====
+                % 关键思想：沿时间维度构建重叠子阵列，恢复满秩协方差矩阵
+                % 
+                % 原始：64快拍 × 4阵元 = 256虚拟阵元，但只有1个样本（秩-1）
+                % 平滑：用32个子阵列（每个32快拍），每个子阵列有独立样本
+                %       协方差矩阵 = 32个秩-1矩阵的平均 → 满秩！
+                
+                [num_elements, num_snapshots] = size(snapshots);
+                
+                % 子阵列配置：使用一半的快拍作为子阵列长度
+                num_subarrays = max(8, floor(num_snapshots / 4));  % 至少8个子阵列
+                subarray_snapshots = num_snapshots - num_subarrays + 1;  % 每个子阵列的快拍数
+                subarray_size = num_elements * subarray_snapshots;  % 每个子阵列的虚拟阵元数
+                
+                % 构建空间平滑协方差矩阵
+                R_smoothed = zeros(subarray_size, subarray_size);
+                
+                % 子阵列的参考位置（使用第一个子阵列）
+                subarray_positions = zeros(subarray_size, 3);
+                for k = 1:subarray_snapshots
+                    t_k = t_axis(k);
+                    pos_k = obj.array_platform.get_mimo_virtual_positions(t_k);
+                    idx_start = (k-1)*num_elements + 1;
+                    idx_end = k*num_elements;
+                    subarray_positions(idx_start:idx_end, :) = pos_k;
+                end
+                
+                % 对每个子阵列计算协方差矩阵并累加
+                for i = 1:num_subarrays
+                    % 子阵列i包含快拍 i 到 i+subarray_snapshots-1
+                    x_sub = zeros(subarray_size, 1);
+                    for k = 1:subarray_snapshots
+                        snap_idx = i + k - 1;
+                        idx_start = (k-1)*num_elements + 1;
+                        idx_end = k*num_elements;
+                        x_sub(idx_start:idx_end) = snapshots(:, snap_idx);
+                    end
+                    R_smoothed = R_smoothed + (x_sub * x_sub');
+                end
+                R_smoothed = R_smoothed / num_subarrays;
+                
+                % 对角加载提高稳定性
+                R_smoothed = R_smoothed + 1e-8 * trace(R_smoothed) / subarray_size * eye(subarray_size);
+                
+                % 特征分解
+                [V, D] = eig(R_smoothed);
+                [eigenvalues, idx] = sort(diag(D), 'descend');
+                V = V(:, idx);
+                Qn = V(:, (num_targets+1):end);
+                
+                % 使用MUSIC搜索
+                if strcmp(search_mode, '1d')
+                    [spectrum, ~] = obj.search_1d(subarray_positions, Qn, search_grid.phi, num_targets);
+                else
+                    [spectrum, ~] = obj.search_2d(subarray_positions, Qn, search_grid, num_targets);
                 end
             end
             
@@ -401,9 +459,10 @@ classdef DoaEstimatorSynthetic
         
         function a = build_steering_vector(obj, positions, u)
             % 构建导向矢量
-            % 相位 = 4π/λ × (位置 · 方向)，FMCW雷达双程传播
+            % 相位 = -4π/λ × (位置 · 方向)，负号表示相位延迟
+            % 这与信号生成中的 exp(-j×phase) 一致
             phase = 4 * pi / obj.lambda * (positions * u);
-            a = exp(1j * phase);
+            a = exp(-1j * phase);  % 注意：负号！与信号模型一致
         end
         
         function [theta_peaks, phi_peaks, peak_vals] = find_peaks_2d(obj, spectrum, search_grid, num_peaks)
@@ -437,6 +496,57 @@ classdef DoaEstimatorSynthetic
             if beamwidth <= 0
                 beamwidth = angle_axis(2) - angle_axis(1);
             end
+        end
+        
+        function [spectrum, peaks] = beamforming_1d(obj, positions, signals, phi_search)
+            % 1D 波束形成 (Bartlett Beamformer)
+            % P(φ) = |a^H(φ) * x|² - 匹配滤波器，适用于单快拍
+            
+            num_phi = length(phi_search);
+            spectrum = zeros(1, num_phi);
+            signals_norm = signals / norm(signals);
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                u = [cosd(phi); sind(phi); 0];
+                a = obj.build_steering_vector(positions, u);
+                beamformer_output = a' * signals_norm;
+                spectrum(phi_idx) = abs(beamformer_output)^2;
+            end
+            
+            spectrum = spectrum / max(spectrum);
+            [~, peak_idx] = max(spectrum);
+            peaks.phi = phi_search(peak_idx);
+            peaks.val = spectrum(peak_idx);
+        end
+        
+        function [spectrum, peaks] = beamforming_2d(obj, positions, signals, search_grid)
+            % 2D 波束形成 - 适合合成孔径的匹配滤波方法
+            
+            theta_search = search_grid.theta;
+            phi_search = search_grid.phi;
+            num_theta = length(theta_search);
+            num_phi = length(phi_search);
+            spectrum = zeros(num_theta, num_phi);
+            signals_norm = signals / norm(signals);
+            
+            for phi_idx = 1:num_phi
+                phi = phi_search(phi_idx);
+                for theta_idx = 1:num_theta
+                    theta = theta_search(theta_idx);
+                    u = [sind(theta)*cosd(phi); sind(theta)*sind(phi); cosd(theta)];
+                    a = obj.build_steering_vector(positions, u);
+                    beamformer_output = a' * signals_norm;
+                    spectrum(theta_idx, phi_idx) = abs(beamformer_output)^2;
+                end
+            end
+            
+            spectrum = spectrum / max(spectrum(:));
+            [~, idx] = max(spectrum(:));
+            [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
+            peaks.theta = search_grid.theta(theta_idx);
+            peaks.phi = search_grid.phi(phi_idx);
+            peaks.val = spectrum(theta_idx, phi_idx);
         end
     end
 end
