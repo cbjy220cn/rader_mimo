@@ -1,20 +1,20 @@
 %% ═══════════════════════════════════════════════════════════════════════════
-%  实验：双目标分辨能力测试 v4.0 (1D时间平滑MUSIC版本)
+%  实验：双目标分辨能力测试 v5.0 (蒙特卡洛版本)
 %  验证：运动阵列在分辨相近目标时的优势
 %  算法：
 %    - 静态阵列：标准MUSIC（多快拍协方差矩阵）
 %    - 运动阵列：时间平滑MUSIC（解决合成孔径单快拍秩-1问题）
-%  特性：
-%    - 使用1D DOA估计（φ方位角），因为双目标只在φ方向分离
-%    - 使用8元ULA + y平移，最大化合成孔径优势
-%    - y平移方向与φ分辨方向匹配，确保孔径扩展有效
+%  改进：
+%    - 每个角度间隔进行多次蒙特卡洛测试
+%    - 统计分辨成功率，而非单次二值结果
+%    - 更有统计意义，结果更可靠
 %% ═══════════════════════════════════════════════════════════════════════════
 clear; clc; close all;
 
 addpath('asset');
 
 % 创建输出文件夹
-script_name = 'experiment_dual_target_1d';
+script_name = 'experiment_dual_target_mc';
 timestamp = datestr(now, 'yyyymmdd_HHMMSS');
 output_folder = fullfile('validation_results', [script_name '_' timestamp]);
 if ~exist(output_folder, 'dir'), mkdir(output_folder); end
@@ -23,7 +23,7 @@ log_file = fullfile(output_folder, 'experiment_log.txt');
 diary(log_file);
 
 fprintf('╔════════════════════════════════════════════════════════════════╗\n');
-fprintf('║       双目标分辨能力测试 v4.0 (1D时间平滑MUSIC)              ║\n');
+fprintf('║     双目标分辨能力测试 v5.0 (蒙特卡洛统计版本)              ║\n');
 fprintf('║  验证：运动阵列分辨相近目标的优势                              ║\n');
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 fprintf('输出目录: %s\n\n', output_folder);
@@ -57,9 +57,15 @@ synthetic_aperture = v * T_obs;
 total_aperture = sqrt(static_aperture^2 + synthetic_aperture^2);
 
 % 双目标角度间隔测试
-angle_separations = [1, 2, 3, 5, 8, 10, 15, 20];  % 度
+% 注意：静态8元ULA孔径=3.5λ，理论分辨率≈16.6°
+% 测试范围应覆盖静态能分辨和不能分辨的区间
+angle_separations = [3, 5, 8, 10, 15, 20, 25, 30];  % 度
 phi_center = 60;   % 中心方位角 - sin(60°)≈0.87，对y方向阵列最优
 theta_fixed = 90;  % 水平面（θ=90°）- 简化为1D问题
+
+% 蒙特卡洛参数
+num_trials = 20;   % 每个间隔测试次数 (减少以加快速度)
+snr_values = [5, 10, 15];  % 测试多个SNR
 
 fprintf('【实验设置】\n');
 fprintf('  阵列: %d元ULA (y方向排列)\n', num_elements);
@@ -71,7 +77,8 @@ fprintf('  合成孔径: %.1f λ (平移%.2fm)\n', synthetic_aperture / lambda, 
 fprintf('  总孔径: %.1f λ\n', total_aperture / lambda);
 fprintf('  目标中心: φ=%.0f°, θ=%.0f° (水平面，1D问题)\n', phi_center, theta_fixed);
 fprintf('  测试角度间隔: [%s]°\n', num2str(angle_separations));
-fprintf('  SNR: %d dB\n\n', snr_db);
+fprintf('  蒙特卡洛次数: %d 次/间隔\n', num_trials);
+fprintf('  测试SNR: [%s] dB\n\n', num2str(snr_values));
 
 % 理论分辨率
 static_resolution = asind(lambda / static_aperture);
@@ -85,111 +92,129 @@ fprintf('  改善: %.1f 倍\n\n', static_resolution / synthetic_resolution);
 phi_search = 30:0.1:90;  % 覆盖φ=60°为中心的范围
 search_grid = struct('phi', phi_search);
 
-%% 运行实验
+%% 运行蒙特卡洛实验
 fprintf('═══════════════════════════════════════════════════════════════════\n');
-fprintf('开始实验\n');
+fprintf('开始蒙特卡洛实验 (共 %d × %d × %d = %d 次测试)\n', ...
+    length(angle_separations), length(snr_values), num_trials, ...
+    length(angle_separations) * length(snr_values) * num_trials);
 fprintf('═══════════════════════════════════════════════════════════════════\n\n');
 
 results = struct();
 results.separations = angle_separations;
-results.static_resolved = zeros(size(angle_separations));
-results.motion_resolved = zeros(size(angle_separations));
-results.static_peaks = cell(size(angle_separations));
-results.motion_peaks = cell(size(angle_separations));
+results.snr_values = snr_values;
+results.num_trials = num_trials;
+
+% 分辨成功率矩阵 [间隔 × SNR]
+results.static_success_rate = zeros(length(angle_separations), length(snr_values));
+results.motion_success_rate = zeros(length(angle_separations), length(snr_values));
+
+% 保存一组典型的谱（用于绘图，使用中间SNR）
+typical_snr_idx = ceil(length(snr_values) / 2);
 results.static_spectra = cell(size(angle_separations));
 results.motion_spectra = cell(size(angle_separations));
 
-fprintf('间隔   | 静态阵列 [峰值φ]     | 运动阵列 [峰值φ]     | 结论\n');
-fprintf('-------|----------------------|----------------------|----------\n');
-
 est_options.search_mode = '1d';
 
-for sep_idx = 1:length(angle_separations)
-    sep = angle_separations(sep_idx);
+for snr_idx = 1:length(snr_values)
+    snr_db = snr_values(snr_idx);
+    fprintf('【SNR = %d dB】\n', snr_db);
+    fprintf('间隔   | 静态成功率 | 运动成功率 | 差异\n');
+    fprintf('-------|------------|------------|--------\n');
     
-    % 双目标角度（方位角方向分离）
-    phi1 = phi_center - sep/2;
-    phi2 = phi_center + sep/2;
-    
-    % 水平面上的目标位置
-    target1_pos = target_range * [cosd(phi1), sind(phi1), 0];
-    target2_pos = target_range * [cosd(phi2), sind(phi2), 0];
-    
-    target1 = Target(target1_pos, [0,0,0], 1);
-    target2 = Target(target2_pos, [0,0,0], 1);
-    
-    % ===== 静态阵列 =====
-    array_static = ArrayPlatform(elements, 1, 1:num_elements);
-    array_static.set_trajectory(@(t) struct('position', [0,0,0], 'orientation', [0,0,0]));
-    
-    sig_gen_static = SignalGeneratorSimple(radar_params, array_static, {target1, target2});
-    rng(sep_idx);
-    snapshots_static = sig_gen_static.generate_snapshots(t_axis, snr_db);
-    
-    % 静态MUSIC (1D)
-    positions_static = array_static.get_mimo_virtual_positions(0);
-    spectrum_static = music_standard_1d(snapshots_static, positions_static, phi_search, lambda, 2);
-    
-    results.static_spectra{sep_idx} = spectrum_static;
-    
-    % 找两个最大峰值
-    min_sep_search = max(0.5, sep * 0.4);
-    [peaks_static_phi] = find_1d_peaks(spectrum_static, phi_search, 2, min_sep_search);
-    results.static_peaks{sep_idx} = peaks_static_phi;
-    
-    % 判断是否分辨
-    [static_resolved, ~] = check_resolution(peaks_static_phi, [phi1, phi2], sep);
-    results.static_resolved(sep_idx) = static_resolved;
-    
-    % ===== 运动阵列 (y平移) =====
-    array_motion = ArrayPlatform(elements, 1, 1:num_elements);
-    array_motion.set_trajectory(@(t) struct('position', [0, v*t, 0], 'orientation', [0,0,0]));
-    
-    sig_gen_motion = SignalGeneratorSimple(radar_params, array_motion, {target1, target2});
-    rng(sep_idx);
-    snapshots_motion = sig_gen_motion.generate_snapshots(t_axis, snr_db);
-    
-    % 运动阵列：时间平滑MUSIC
-    estimator_motion = DoaEstimatorSynthetic(array_motion, radar_params);
-    [spectrum_motion, ~, ~] = estimator_motion.estimate(snapshots_motion, t_axis, search_grid, 2, est_options);
-    
-    results.motion_spectra{sep_idx} = spectrum_motion;
-    
-    % 手动从谱中检测峰值（更准确）
-    peaks_motion_phi = find_1d_peaks(spectrum_motion, phi_search, 2, min_sep_search);
-    results.motion_peaks{sep_idx} = peaks_motion_phi;
-    
-    [motion_resolved, ~] = check_resolution(peaks_motion_phi, [phi1, phi2], sep);
-    results.motion_resolved(sep_idx) = motion_resolved;
-    
-    % 输出详细信息
-    static_str = ternary(static_resolved, '✓', '✗');
-    motion_str = ternary(motion_resolved, '✓', '✗');
-    
-    if motion_resolved && ~static_resolved
-        conclusion = '★运动优势';
-    elseif motion_resolved && static_resolved
-        conclusion = '均可分辨';
-    elseif ~motion_resolved && ~static_resolved
-        conclusion = '均不可分辨';
-    else
-        conclusion = '静态优势';
+    for sep_idx = 1:length(angle_separations)
+        sep = angle_separations(sep_idx);
+        
+        % 双目标角度（方位角方向分离）
+        phi1 = phi_center - sep/2;
+        phi2 = phi_center + sep/2;
+        
+        static_success_count = 0;
+        motion_success_count = 0;
+        
+        for trial = 1:num_trials
+            % 随机种子
+            rng(sep_idx * 1000 + snr_idx * 100 + trial);
+            
+            % 水平面上的目标位置
+            target1_pos = target_range * [cosd(phi1), sind(phi1), 0];
+            target2_pos = target_range * [cosd(phi2), sind(phi2), 0];
+            
+            target1 = Target(target1_pos, [0,0,0], 1);
+            target2 = Target(target2_pos, [0,0,0], 1);
+            
+            % ===== 静态阵列 =====
+            % 信号生成器已包含目标波动（每快拍独立幅度）
+            % 这模拟真实环境，静态和运动阵列使用相同信号模型
+            array_static = ArrayPlatform(elements, 1, 1:num_elements);
+            array_static.set_trajectory(@(t) struct('position', [0,0,0], 'orientation', [0,0,0]));
+            
+            sig_gen_static = SignalGeneratorSimple(radar_params, array_static, {target1, target2});
+            snapshots_static = sig_gen_static.generate_snapshots(t_axis, snr_db);
+            
+            % 静态MUSIC (1D)
+            positions_static = array_static.get_mimo_virtual_positions(0);
+            spectrum_static = music_standard_1d(snapshots_static, positions_static, phi_search, lambda, 2);
+            
+            % 保存典型谱（第一次试验）
+            if trial == 1 && snr_idx == typical_snr_idx
+                results.static_spectra{sep_idx} = spectrum_static;
+            end
+            
+            % 找两个最大峰值
+            min_sep_search = max(0.5, sep * 0.4);
+            peaks_static_phi = find_1d_peaks(spectrum_static, phi_search, 2, min_sep_search);
+            
+            % 判断是否分辨
+            [static_resolved, ~] = check_resolution(peaks_static_phi, [phi1, phi2], sep);
+            if static_resolved
+                static_success_count = static_success_count + 1;
+            end
+            
+            % ===== 运动阵列 (y平移) =====
+            array_motion = ArrayPlatform(elements, 1, 1:num_elements);
+            array_motion.set_trajectory(@(t) struct('position', [0, v*t, 0], 'orientation', [0,0,0]));
+            
+            sig_gen_motion = SignalGeneratorSimple(radar_params, array_motion, {target1, target2});
+            snapshots_motion = sig_gen_motion.generate_snapshots(t_axis, snr_db);
+            
+            % 运动阵列：时间平滑MUSIC
+            estimator_motion = DoaEstimatorSynthetic(array_motion, radar_params);
+            [spectrum_motion, ~, ~] = estimator_motion.estimate(snapshots_motion, t_axis, search_grid, 2, est_options);
+            
+            % 保存典型谱
+            if trial == 1 && snr_idx == typical_snr_idx
+                results.motion_spectra{sep_idx} = spectrum_motion;
+            end
+            
+            % 峰值检测
+            peaks_motion_phi = find_1d_peaks(spectrum_motion, phi_search, 2, min_sep_search);
+            
+            [motion_resolved, ~] = check_resolution(peaks_motion_phi, [phi1, phi2], sep);
+            if motion_resolved
+                motion_success_count = motion_success_count + 1;
+            end
+        end
+        
+        % 计算成功率
+        static_rate = static_success_count / num_trials * 100;
+        motion_rate = motion_success_count / num_trials * 100;
+        
+        results.static_success_rate(sep_idx, snr_idx) = static_rate;
+        results.motion_success_rate(sep_idx, snr_idx) = motion_rate;
+        
+        % 输出
+        diff_str = '';
+        if motion_rate > static_rate + 10
+            diff_str = sprintf('+%.0f%%', motion_rate - static_rate);
+        elseif static_rate > motion_rate + 10
+            diff_str = sprintf('-%.0f%%', static_rate - motion_rate);
+        else
+            diff_str = '≈';
+        end
+        
+        fprintf('  %2d°  |   %5.1f%%   |   %5.1f%%   | %s\n', sep, static_rate, motion_rate, diff_str);
     end
-    
-    % 输出峰值位置
-    if length(peaks_static_phi) >= 2
-        static_peaks_str = sprintf('[%.1f,%.1f]', peaks_static_phi(1), peaks_static_phi(2));
-    else
-        static_peaks_str = sprintf('[%.1f,-]', peaks_static_phi(1));
-    end
-    
-    if length(peaks_motion_phi) >= 2
-        motion_peaks_str = sprintf('[%.1f,%.1f]', peaks_motion_phi(1), peaks_motion_phi(2));
-    else
-        motion_peaks_str = sprintf('[%.1f,-]', peaks_motion_phi(1));
-    end
-    
-    fprintf('  %2d°  | %s %s | %s %s | %s\n', sep, static_str, static_peaks_str, motion_str, motion_peaks_str, conclusion);
+    fprintf('\n');
 end
 
 %% 绘图
@@ -197,79 +222,130 @@ fprintf('\n═══════════════════════
 fprintf('生成结果图表\n');
 fprintf('═══════════════════════════════════════════════════════════════════\n\n');
 
-% 图1: 分辨能力对比柱状图
+% 定义颜色和标记
+color_static = [0.3, 0.3, 0.3];  % 深灰
+color_motion = [0.0, 0.45, 0.74];  % 蓝色
+
+% 图1: 分辨成功率对比柱状图（选择中间SNR）
 fig1 = figure('Position', [100, 100, 900, 400], 'Color', 'white');
 set(gcf, 'DefaultAxesFontName', 'SimHei');
 
 subplot(1, 2, 1);
-bar([results.static_resolved; results.motion_resolved]', 'grouped');
+bar_data = [results.static_success_rate(:, typical_snr_idx), results.motion_success_rate(:, typical_snr_idx)];
+b = bar(bar_data, 'grouped');
+b(1).FaceColor = color_static;
+b(1).EdgeColor = 'k';
+b(1).LineWidth = 1.2;
+b(2).FaceColor = color_motion;
+b(2).EdgeColor = 'k';
+b(2).LineWidth = 1.2;
+
 set(gca, 'XTick', 1:length(angle_separations), 'XTickLabel', arrayfun(@(x) sprintf('%d°', x), angle_separations, 'UniformOutput', false));
-xlabel('双目标角度间隔', 'FontWeight', 'bold');
-ylabel('分辨成功 (1=是, 0=否)', 'FontWeight', 'bold');
-title('(a) 分辨能力对比', 'FontSize', 12, 'FontWeight', 'bold');
-legend({'静态阵列', '运动阵列'}, 'Location', 'southeast');
+xlabel('双目标角度间隔', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('分辨成功率 (%)', 'FontWeight', 'bold', 'FontSize', 11);
+title(sprintf('(a) 分辨成功率对比 (SNR=%ddB, N=%d)', snr_values(typical_snr_idx), num_trials), 'FontSize', 12, 'FontWeight', 'bold');
+legend({'静态阵列', '运动阵列'}, 'Location', 'southeast', 'FontSize', 10);
 grid on;
-ylim([0, 1.2]);
+ylim([0, 110]);
 
 % 添加理论分辨率线
 hold on;
 theoretical_static = find(angle_separations >= static_resolution, 1);
-theoretical_motion = find(angle_separations >= synthetic_resolution, 1);
 if ~isempty(theoretical_static)
-    plot([theoretical_static-0.5, theoretical_static-0.5], [0, 1.2], 'k--', 'LineWidth', 1.5);
-    text(theoretical_static-0.3, 1.1, sprintf('静态理论\n%.1f°', static_resolution), 'FontSize', 8);
+    xline(theoretical_static - 0.5, 'k--', 'LineWidth', 1.5);
+    text(theoretical_static - 0.3, 105, sprintf('静态理论\n%.1f°', static_resolution), 'FontSize', 9);
 end
 hold off;
 
 subplot(1, 2, 2);
-% 找到最小可分辨间隔
-static_min = min(angle_separations(results.static_resolved == 1));
-motion_min = min(angle_separations(results.motion_resolved == 1));
-if isempty(static_min), static_min = max(angle_separations); end
-if isempty(motion_min), motion_min = max(angle_separations); end
+% 找到90%成功率对应的最小间隔
+threshold = 90;  % 90%成功率作为"可分辨"标准
+static_min = find_min_resolvable_angle(angle_separations, results.static_success_rate(:, typical_snr_idx), threshold);
+motion_min = find_min_resolvable_angle(angle_separations, results.motion_success_rate(:, typical_snr_idx), threshold);
 
 bar_data = [static_min, motion_min];
 b = bar(1:2, bar_data, 0.5);
 b.FaceColor = 'flat';
-b.CData(1,:) = [0.3, 0.3, 0.3];
-b.CData(2,:) = [0.0, 0.45, 0.74];
+b.CData(1,:) = color_static;
+b.CData(2,:) = color_motion;
+b.EdgeColor = 'k';
+b.LineWidth = 1.2;
 set(gca, 'XTick', 1:2, 'XTickLabel', {'静态阵列', '运动阵列'});
-ylabel('最小可分辨角度 (°)', 'FontWeight', 'bold');
-title('(b) 分辨率对比', 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('最小可分辨角度 (°)', 'FontWeight', 'bold', 'FontSize', 11);
+title(sprintf('(b) 最小分辨角度 (成功率≥%d%%)', threshold), 'FontSize', 12, 'FontWeight', 'bold');
 grid on;
 
 % 添加数值标签
-text(1, bar_data(1)+0.5, sprintf('%.0f°', bar_data(1)), 'HorizontalAlignment', 'center', 'FontSize', 11, 'FontWeight', 'bold');
-text(2, bar_data(2)+0.5, sprintf('%.0f°', bar_data(2)), 'HorizontalAlignment', 'center', 'FontSize', 11, 'FontWeight', 'bold');
+text(1, bar_data(1)+1, sprintf('%.0f°', bar_data(1)), 'HorizontalAlignment', 'center', 'FontSize', 12, 'FontWeight', 'bold');
+text(2, bar_data(2)+1, sprintf('%.0f°', bar_data(2)), 'HorizontalAlignment', 'center', 'FontSize', 12, 'FontWeight', 'bold');
 
 % 改善倍数
-if motion_min > 0
-    improvement = static_min / motion_min;
+if motion_min > 0 && bar_data(1) > bar_data(2)
+    improvement = bar_data(1) / bar_data(2);
     text(1.5, max(bar_data)*0.6, sprintf('分辨率提升\n%.1f倍', improvement), ...
         'HorizontalAlignment', 'center', 'FontSize', 12, 'FontWeight', 'bold', 'Color', [0 0.5 0]);
 end
 
-sgtitle(sprintf('双目标分辨能力测试 (8元ULA + y平移, SNR=%ddB)', snr_db), 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle(sprintf('双目标分辨能力测试 (8元ULA + y平移, %d次蒙特卡洛)', num_trials), 'FontSize', 14, 'FontWeight', 'bold');
 
-saveas(fig1, fullfile(output_folder, 'fig1_分辨能力对比.png'));
-saveas(fig1, fullfile(output_folder, 'fig1_分辨能力对比.eps'), 'epsc');
+saveas(fig1, fullfile(output_folder, 'fig1_分辨成功率对比.png'));
+saveas(fig1, fullfile(output_folder, 'fig1_分辨成功率对比.eps'), 'epsc');
 
-%% 图2: MUSIC谱对比（选择典型间隔）
-% 选择一个能体现运动优势的间隔
-typical_sep_idx = 0;
-for i = 1:length(angle_separations)
-    if results.motion_resolved(i) && ~results.static_resolved(i)
-        typical_sep_idx = i;
-        break;
-    end
+%% 图2: 不同SNR下的成功率曲线
+fig2 = figure('Position', [100, 100, 600, 450], 'Color', 'white');
+set(gcf, 'DefaultAxesFontName', 'SimHei');
+
+% 线型和标记
+line_styles_static = {'--', '-.', ':'};
+line_styles_motion = {'-', '-', '-'};
+markers = {'o', 's', 'd'};
+
+hold on;
+legend_entries = {};
+for snr_idx = 1:length(snr_values)
+    snr = snr_values(snr_idx);
+    
+    % 静态阵列
+    plot(angle_separations, results.static_success_rate(:, snr_idx), ...
+        line_styles_static{snr_idx}, 'Color', color_static, 'LineWidth', 1.5, ...
+        'Marker', markers{snr_idx}, 'MarkerSize', 7, 'MarkerFaceColor', 'w');
+    legend_entries{end+1} = sprintf('静态 SNR=%ddB', snr);
+    
+    % 运动阵列
+    plot(angle_separations, results.motion_success_rate(:, snr_idx), ...
+        line_styles_motion{snr_idx}, 'Color', color_motion, 'LineWidth', 2, ...
+        'Marker', markers{snr_idx}, 'MarkerSize', 8, 'MarkerFaceColor', color_motion);
+    legend_entries{end+1} = sprintf('运动 SNR=%ddB', snr);
 end
-if typical_sep_idx == 0
-    % 如果没有找到运动优势的，选择5°或最接近的
+
+% 90%成功率参考线
+yline(90, 'k--', 'LineWidth', 1, 'Alpha', 0.5);
+text(max(angle_separations)-2, 92, '90%阈值', 'FontSize', 9, 'Color', [0.5,0.5,0.5]);
+
+hold off;
+
+xlabel('双目标角度间隔 (°)', 'FontWeight', 'bold', 'FontSize', 12);
+ylabel('分辨成功率 (%)', 'FontWeight', 'bold', 'FontSize', 12);
+title('不同SNR下的分辨成功率', 'FontSize', 14, 'FontWeight', 'bold');
+legend(legend_entries, 'Location', 'southeast', 'FontSize', 9, 'NumColumns', 2);
+grid on;
+xlim([min(angle_separations)-1, max(angle_separations)+1]);
+ylim([0, 105]);
+
+saveas(fig2, fullfile(output_folder, 'fig2_SNR对比.png'));
+saveas(fig2, fullfile(output_folder, 'fig2_SNR对比.eps'), 'epsc');
+
+%% 图3: MUSIC谱对比（选择典型间隔）
+% 选择一个能体现运动优势的间隔（成功率差异最大）
+rate_diff = results.motion_success_rate(:, typical_snr_idx) - results.static_success_rate(:, typical_snr_idx);
+[~, typical_sep_idx] = max(rate_diff);
+if rate_diff(typical_sep_idx) < 10
+    % 如果差异不明显，选择5°或最接近的
     typical_sep_idx = find(angle_separations == 5, 1);
-    if isempty(typical_sep_idx), typical_sep_idx = 4; end
+    if isempty(typical_sep_idx), typical_sep_idx = 2; end
 end
 
-fig2 = figure('Position', [100, 100, 1000, 400], 'Color', 'white');
+fig3 = figure('Position', [100, 100, 1000, 400], 'Color', 'white');
 set(gcf, 'DefaultAxesFontName', 'SimHei');
 
 sep = angle_separations(typical_sep_idx);
@@ -277,60 +353,52 @@ phi1 = phi_center - sep/2;
 phi2 = phi_center + sep/2;
 
 subplot(1, 2, 1);
-spectrum_db = 10*log10(results.static_spectra{typical_sep_idx} / max(results.static_spectra{typical_sep_idx}));
-plot(phi_search, spectrum_db, 'b-', 'LineWidth', 2);
-hold on;
-xline(phi1, 'r--', 'LineWidth', 2);
-xline(phi2, 'r--', 'LineWidth', 2);
-hold off;
-xlabel('方位角 φ (°)', 'FontWeight', 'bold');
-ylabel('归一化功率 (dB)', 'FontWeight', 'bold');
-title(sprintf('(a) 静态阵列 (孔径=%.1fλ)', static_aperture/lambda), 'FontWeight', 'bold');
+if ~isempty(results.static_spectra{typical_sep_idx})
+    spectrum_db = 10*log10(results.static_spectra{typical_sep_idx} / max(results.static_spectra{typical_sep_idx}));
+    plot(phi_search, spectrum_db, 'k-', 'LineWidth', 2);
+    hold on;
+    xline(phi1, 'r--', 'LineWidth', 2);
+    xline(phi2, 'r--', 'LineWidth', 2);
+    hold off;
+end
+xlabel('方位角 φ (°)', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('归一化功率 (dB)', 'FontWeight', 'bold', 'FontSize', 11);
+title(sprintf('(a) 静态阵列 (成功率=%.0f%%)', results.static_success_rate(typical_sep_idx, typical_snr_idx)), ...
+    'FontWeight', 'bold', 'FontSize', 12);
 xlim([phi_center-25, phi_center+25]);
 ylim([-40, 5]);
 grid on;
-legend({'MUSIC谱', '真实目标'}, 'Location', 'south');
-
-% 标注分辨结果
-if results.static_resolved(typical_sep_idx)
-    text(phi_center, -35, '✓ 可分辨', 'HorizontalAlignment', 'center', 'FontSize', 12, 'Color', 'g', 'FontWeight', 'bold');
-else
-    text(phi_center, -35, '✗ 不可分辨', 'HorizontalAlignment', 'center', 'FontSize', 12, 'Color', 'r', 'FontWeight', 'bold');
-end
+legend({'MUSIC谱', '真实目标'}, 'Location', 'south', 'FontSize', 10);
 
 subplot(1, 2, 2);
-spectrum_db = 10*log10(results.motion_spectra{typical_sep_idx} / max(results.motion_spectra{typical_sep_idx}));
-plot(phi_search, spectrum_db, 'b-', 'LineWidth', 2);
-hold on;
-xline(phi1, 'r--', 'LineWidth', 2);
-xline(phi2, 'r--', 'LineWidth', 2);
-hold off;
-xlabel('方位角 φ (°)', 'FontWeight', 'bold');
-ylabel('归一化功率 (dB)', 'FontWeight', 'bold');
-title(sprintf('(b) 运动阵列 (合成孔径=%.1fλ)', total_aperture/lambda), 'FontWeight', 'bold');
+if ~isempty(results.motion_spectra{typical_sep_idx})
+    spectrum_db = 10*log10(results.motion_spectra{typical_sep_idx} / max(results.motion_spectra{typical_sep_idx}));
+    plot(phi_search, spectrum_db, 'b-', 'LineWidth', 2);
+    hold on;
+    xline(phi1, 'r--', 'LineWidth', 2);
+    xline(phi2, 'r--', 'LineWidth', 2);
+    hold off;
+end
+xlabel('方位角 φ (°)', 'FontWeight', 'bold', 'FontSize', 11);
+ylabel('归一化功率 (dB)', 'FontWeight', 'bold', 'FontSize', 11);
+title(sprintf('(b) 运动阵列 (成功率=%.0f%%)', results.motion_success_rate(typical_sep_idx, typical_snr_idx)), ...
+    'FontWeight', 'bold', 'FontSize', 12);
 xlim([phi_center-25, phi_center+25]);
 ylim([-40, 5]);
 grid on;
-legend({'时间平滑MUSIC谱', '真实目标'}, 'Location', 'south');
+legend({'时间平滑MUSIC谱', '真实目标'}, 'Location', 'south', 'FontSize', 10);
 
-% 标注分辨结果
-if results.motion_resolved(typical_sep_idx)
-    text(phi_center, -35, '✓ 可分辨', 'HorizontalAlignment', 'center', 'FontSize', 12, 'Color', 'g', 'FontWeight', 'bold');
-else
-    text(phi_center, -35, '✗ 不可分辨', 'HorizontalAlignment', 'center', 'FontSize', 12, 'Color', 'r', 'FontWeight', 'bold');
-end
+sgtitle(sprintf('MUSIC谱对比 (间隔=%d°, SNR=%ddB)', sep, snr_values(typical_snr_idx)), 'FontSize', 14, 'FontWeight', 'bold');
 
-sgtitle(sprintf('1D MUSIC谱对比 (间隔=%d°)', sep), 'FontSize', 14, 'FontWeight', 'bold');
+saveas(fig3, fullfile(output_folder, 'fig3_MUSIC谱对比.png'));
+saveas(fig3, fullfile(output_folder, 'fig3_MUSIC谱对比.eps'), 'epsc');
 
-saveas(fig2, fullfile(output_folder, 'fig2_MUSIC谱对比.png'));
-saveas(fig2, fullfile(output_folder, 'fig2_MUSIC谱对比.eps'), 'epsc');
-
-%% 图3: 多间隔MUSIC谱对比
-fig3 = figure('Position', [100, 100, 1200, 600], 'Color', 'white');
+%% 图4: 多间隔MUSIC谱对比
+fig4 = figure('Position', [100, 100, 1200, 500], 'Color', 'white');
 set(gcf, 'DefaultAxesFontName', 'SimHei');
 
 % 选择4个代表性间隔
-selected_seps = [2, 5, 10, 15];
+selected_seps = [3, 5, 10, 15];
 selected_idx = [];
 for s = selected_seps
     idx = find(angle_separations == s, 1);
@@ -345,52 +413,65 @@ for i = 1:length(selected_idx)
     phi1 = phi_center - sep/2;
     phi2 = phi_center + sep/2;
     
+    static_rate = results.static_success_rate(idx, typical_snr_idx);
+    motion_rate = results.motion_success_rate(idx, typical_snr_idx);
+    
     % 静态
-    subplot(2, 4, i);
-    spectrum_db = 10*log10(results.static_spectra{idx} / max(results.static_spectra{idx}));
-    plot(phi_search, spectrum_db, 'k-', 'LineWidth', 1.5);
-    hold on;
-    xline(phi1, 'r--', 'LineWidth', 1.5);
-    xline(phi2, 'r--', 'LineWidth', 1.5);
-    hold off;
+    subplot(2, length(selected_idx), i);
+    if ~isempty(results.static_spectra{idx})
+        spectrum_db = 10*log10(results.static_spectra{idx} / max(results.static_spectra{idx}));
+        plot(phi_search, spectrum_db, 'k-', 'LineWidth', 1.5);
+        hold on;
+        xline(phi1, 'r--', 'LineWidth', 1.5);
+        xline(phi2, 'r--', 'LineWidth', 1.5);
+        hold off;
+    end
     xlim([max(30, phi_center-25), min(90, phi_center+25)]);
     ylim([-30, 5]);
     grid on;
-    if results.static_resolved(idx)
-        title(sprintf('静态 %d° ✓', sep), 'Color', 'g', 'FontWeight', 'bold');
+    if static_rate >= 90
+        title_color = [0, 0.6, 0];  % 绿色
+    elseif static_rate >= 50
+        title_color = [0.8, 0.5, 0];  % 橙色
     else
-        title(sprintf('静态 %d° ✗', sep), 'Color', 'r', 'FontWeight', 'bold');
+        title_color = [0.8, 0, 0];  % 红色
     end
+    title(sprintf('静态 %d° (%.0f%%)', sep, static_rate), 'Color', title_color, 'FontWeight', 'bold', 'FontSize', 11);
     if i == 1
         ylabel('归一化功率 (dB)', 'FontWeight', 'bold');
     end
     
     % 运动
-    subplot(2, 4, i + 4);
-    spectrum_db = 10*log10(results.motion_spectra{idx} / max(results.motion_spectra{idx}));
-    plot(phi_search, spectrum_db, 'b-', 'LineWidth', 1.5);
-    hold on;
-    xline(phi1, 'r--', 'LineWidth', 1.5);
-    xline(phi2, 'r--', 'LineWidth', 1.5);
-    hold off;
+    subplot(2, length(selected_idx), i + length(selected_idx));
+    if ~isempty(results.motion_spectra{idx})
+        spectrum_db = 10*log10(results.motion_spectra{idx} / max(results.motion_spectra{idx}));
+        plot(phi_search, spectrum_db, 'b-', 'LineWidth', 1.5);
+        hold on;
+        xline(phi1, 'r--', 'LineWidth', 1.5);
+        xline(phi2, 'r--', 'LineWidth', 1.5);
+        hold off;
+    end
     xlim([max(30, phi_center-25), min(90, phi_center+25)]);
     ylim([-30, 5]);
     grid on;
     xlabel('φ (°)', 'FontWeight', 'bold');
-    if results.motion_resolved(idx)
-        title(sprintf('运动 %d° ✓', sep), 'Color', 'g', 'FontWeight', 'bold');
+    if motion_rate >= 90
+        title_color = [0, 0.6, 0];
+    elseif motion_rate >= 50
+        title_color = [0.8, 0.5, 0];
     else
-        title(sprintf('运动 %d° ✗', sep), 'Color', 'r', 'FontWeight', 'bold');
+        title_color = [0.8, 0, 0];
     end
+    title(sprintf('运动 %d° (%.0f%%)', sep, motion_rate), 'Color', title_color, 'FontWeight', 'bold', 'FontSize', 11);
     if i == 1
         ylabel('归一化功率 (dB)', 'FontWeight', 'bold');
     end
 end
 
-sgtitle('不同间隔下的MUSIC谱对比 (上:静态, 下:运动)', 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle(sprintf('MUSIC谱对比 (上:静态, 下:运动, SNR=%ddB)', snr_values(typical_snr_idx)), 'FontSize', 14, 'FontWeight', 'bold');
 
-saveas(fig3, fullfile(output_folder, 'fig3_多间隔对比.png'));
-saveas(fig3, fullfile(output_folder, 'fig3_多间隔对比.eps'), 'epsc');
+saveas(fig4, fullfile(output_folder, 'fig4_多间隔对比.png'));
+saveas(fig4, fullfile(output_folder, 'fig4_多间隔对比.eps'), 'epsc');
 
 %% 统计
 fprintf('\n═══════════════════════════════════════════════════════════════════\n');
@@ -406,23 +487,66 @@ fprintf('【理论分辨率】\n');
 fprintf('  静态: %.1f°\n', static_resolution);
 fprintf('  合成: %.2f°\n\n', synthetic_resolution);
 
-fprintf('【实测分辨率】\n');
-fprintf('  静态阵列最小可分辨间隔: %d°\n', static_min);
-fprintf('  运动阵列最小可分辨间隔: %d°\n', motion_min);
-if motion_min > 0
-    fprintf('  分辨率改善: %.1f 倍\n\n', static_min / motion_min);
+fprintf('【实测分辨率 (90%%成功率标准)】\n');
+fprintf('  SNR    | 静态最小角 | 运动最小角 | 改善倍数\n');
+fprintf('  -------|------------|------------|----------\n');
+for snr_idx = 1:length(snr_values)
+    static_min_snr = find_min_resolvable_angle(angle_separations, results.static_success_rate(:, snr_idx), 90);
+    motion_min_snr = find_min_resolvable_angle(angle_separations, results.motion_success_rate(:, snr_idx), 90);
+    if motion_min_snr > 0 && static_min_snr > motion_min_snr
+        improvement = static_min_snr / motion_min_snr;
+        fprintf('  %2ddB   |   %5.1f°   |   %5.1f°   |  %.1fx\n', snr_values(snr_idx), static_min_snr, motion_min_snr, improvement);
+    else
+        fprintf('  %2ddB   |   %5.1f°   |   %5.1f°   |   -\n', snr_values(snr_idx), static_min_snr, motion_min_snr);
+    end
 end
+fprintf('\n');
+
+fprintf('【成功率汇总 (SNR=%ddB)】\n', snr_values(typical_snr_idx));
+fprintf('  间隔   | 静态成功率 | 运动成功率 | 提升\n');
+fprintf('  -------|------------|------------|------\n');
+for sep_idx = 1:length(angle_separations)
+    static_rate = results.static_success_rate(sep_idx, typical_snr_idx);
+    motion_rate = results.motion_success_rate(sep_idx, typical_snr_idx);
+    diff = motion_rate - static_rate;
+    if diff > 0
+        diff_str = sprintf('+%.0f%%', diff);
+    elseif diff < 0
+        diff_str = sprintf('%.0f%%', diff);
+    else
+        diff_str = '=';
+    end
+    fprintf('  %3d°   |   %5.1f%%   |   %5.1f%%   | %s\n', angle_separations(sep_idx), static_rate, motion_rate, diff_str);
+end
+fprintf('\n');
 
 fprintf('【核心结论】\n');
-if motion_min < static_min
+% 计算中间SNR的最小可分辨角度
+static_min_typical = find_min_resolvable_angle(angle_separations, results.static_success_rate(:, typical_snr_idx), 90);
+motion_min_typical = find_min_resolvable_angle(angle_separations, results.motion_success_rate(:, typical_snr_idx), 90);
+
+if motion_min_typical < static_min_typical
     fprintf('  ✅ 运动阵列通过时间平滑MUSIC，显著提升角度分辨率\n');
-    fprintf('  ✅ 可分辨更近的双目标 (%d° vs %d°)\n', motion_min, static_min);
+    fprintf('  ✅ 90%%成功率最小角: 运动 %.0f° vs 静态 %.0f° (提升%.1f倍)\n', motion_min_typical, static_min_typical, static_min_typical/motion_min_typical);
 else
     fprintf('  ⚠️ 运动阵列未显示出分辨率优势，需要检查参数\n');
 end
 
+% 计算平均成功率提升
+avg_improvement = mean(results.motion_success_rate(:, typical_snr_idx) - results.static_success_rate(:, typical_snr_idx));
+fprintf('  📊 平均成功率提升: %.1f%%\n', avg_improvement);
+
 %% 保存
-save(fullfile(output_folder, 'experiment_results.mat'), 'results', 'static_aperture', 'synthetic_aperture', 'total_aperture');
+results.static_aperture = static_aperture;
+results.synthetic_aperture = synthetic_aperture;
+results.total_aperture = total_aperture;
+results.phi_center = phi_center;
+results.phi_search = phi_search;
+results.lambda = lambda;
+results.static_resolution = static_resolution;
+results.synthetic_resolution = synthetic_resolution;
+
+save(fullfile(output_folder, 'experiment_results.mat'), 'results');
 fprintf('\n实验完成！结果保存在: %s\n', output_folder);
 diary off;
 
@@ -515,14 +639,8 @@ function [resolved, details] = check_resolution(estimated_peaks, true_angles, se
     sep_significant = est_separation > sep * 0.5;
     
     % 分辨标准2: 两个峰值是否分别在两个目标附近
-    % 容差策略：
-    %   - 小间隔（<=5°）：允许更大相对误差，容差 = sep*0.4 + 0.5
-    %   - 大间隔（>5°）：固定小容差 = 2.0°，因为大间隔更容易分辨，要求更准确
-    if sep <= 5
-        tolerance = sep * 0.4 + 0.5;  % 2°间隔时容差=1.3°, 5°间隔时容差=2.5°
-    else
-        tolerance = 2.0;  % 大间隔时固定2°容差
-    end
+    % 容差策略：容差 = 间隔的30% + 1°，但最小2°，最大5°
+    tolerance = min(5, max(2, sep * 0.3 + 1));
     
     true_sorted = sort(true_angles);
     est_sorted = sort(estimated_peaks);
@@ -562,5 +680,35 @@ function out = ternary(cond, true_val, false_val)
         out = true_val;
     else
         out = false_val;
+    end
+end
+
+function min_angle = find_min_resolvable_angle(angles, success_rates, threshold)
+    % 找到成功率达到阈值的最小角度间隔
+    % 使用插值来获得更精确的值
+    
+    above_threshold = success_rates >= threshold;
+    if ~any(above_threshold)
+        min_angle = max(angles);  % 都不能分辨，返回最大值
+        return;
+    end
+    
+    first_above = find(above_threshold, 1);
+    if first_above == 1
+        min_angle = angles(1);  % 最小角度就已经能分辨
+        return;
+    end
+    
+    % 在相邻两点之间插值
+    x1 = angles(first_above - 1);
+    x2 = angles(first_above);
+    y1 = success_rates(first_above - 1);
+    y2 = success_rates(first_above);
+    
+    % 线性插值找到阈值对应的角度
+    if y2 > y1
+        min_angle = x1 + (threshold - y1) / (y2 - y1) * (x2 - x1);
+    else
+        min_angle = x2;
     end
 end

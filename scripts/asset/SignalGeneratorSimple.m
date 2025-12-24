@@ -42,8 +42,37 @@ classdef SignalGeneratorSimple
             % 初始化输出
             snapshots = zeros(num_virtual_elements, num_snapshots);
             
-            % 为每个目标生成一个固定的随机复数幅度（整个CPI内恒定）
-            target_amplitudes = (randn(num_targets, 1) + 1j * randn(num_targets, 1)) / sqrt(2);
+            % 为每个目标生成部分相干的随机复数幅度序列
+            % 使用AR(1)模型模拟目标散射的时间相关性
+            %
+            % 物理背景：
+            %   - 真实目标在短时间内散射特性近似恒定（相干时间）
+            %   - 但存在缓慢的随机波动（目标微动、大气扰动等）
+            %   - AR(1)模型：α(k) = ρ×α(k-1) + √(1-ρ²)×w(k)
+            %
+            % 参数 rho 的意义：
+            %   - rho = 1：完全相干，所有快拍幅度相同
+            %   - rho = 0：完全独立，快拍间无相关性
+            %   - rho ≈ 0.95：部分相干，相邻快拍高度相关，远距快拍逐渐独立
+            %
+            % 对时间平滑MUSIC的影响：
+            %   - 需要部分相干才能正常工作
+            %   - rho太小会破坏合成孔径的空间一致性
+            %   - rho太大会导致协方差矩阵秩不足
+            
+            rho = 0.95;  % 相邻快拍相关系数（可调）
+            
+            target_amplitudes = zeros(num_targets, num_snapshots);
+            for i = 1:num_targets
+                % AR(1)过程生成部分相干序列
+                alpha_prev = (randn + 1j*randn) / sqrt(2);
+                for k = 1:num_snapshots
+                    innovation = (randn + 1j*randn) / sqrt(2);
+                    alpha_curr = rho * alpha_prev + sqrt(1 - rho^2) * innovation;
+                    target_amplitudes(i, k) = alpha_curr;
+                    alpha_prev = alpha_curr;
+                end
+            end
             
             % 遍历每个快拍
             for k = 1:num_snapshots
@@ -73,8 +102,8 @@ classdef SignalGeneratorSimple
                         % 位置包含运动偏移，这样不同快拍的相位会不同
                         phase = 4 * pi / lambda * dot(virt_pos, target_dir);
                         
-                        % 信号 = 幅度 × RCS × exp(-j×相位)
-                        signal = target_amplitudes(i) * sqrt(target_rcs) * exp(-1j * phase);
+                        % 信号 = 幅度(k) × RCS × exp(-j×相位)
+                        signal = target_amplitudes(i, k) * sqrt(target_rcs) * exp(-1j * phase);
                         
                         snapshots(v, k) = snapshots(v, k) + signal;
                     end
