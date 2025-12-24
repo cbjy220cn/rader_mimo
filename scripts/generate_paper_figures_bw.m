@@ -60,6 +60,12 @@ set(0, 'DefaultAxesFontName', 'SimHei');
 set(0, 'DefaultAxesFontSize', 11);
 set(0, 'DefaultLineLineWidth', 1.5);
 
+% ===== 图像导出设置 =====
+dpi_resolution = 300;  % 高分辨率 300 DPI
+
+% 辅助函数：高清保存图片
+save_figure_hd = @(fig, filepath) print(fig, filepath, '-dpng', sprintf('-r%d', dpi_resolution));
+
 %% ═══════════════════════════════════════════════════════════════════════════
 %  第一部分: 综合运动阵列测试图像
 %% ═══════════════════════════════════════════════════════════════════════════
@@ -97,7 +103,7 @@ for arr_idx = 1:length(array_names)
     xlabel('SNR (dB)', 'FontWeight', 'bold');
     ylabel('RMSE (°)', 'FontWeight', 'bold');
     title(sprintf('%s: 不同运动模式RMSE对比', array_names{arr_idx}), 'FontWeight', 'bold');
-    legend('Location', 'northeast', 'FontSize', 9);
+    legend('Location', 'southwest', 'FontSize', 9);  % 移到左下角避免遮挡数据
     grid on;
     box on;
     
@@ -105,12 +111,12 @@ for arr_idx = 1:length(array_names)
     set(gca, 'YScale', 'log');
     xlim([snr_range(1)-1, snr_range(end)+1]);
     
-    % 保存
-    saveas(fig, fullfile(output_folder, sprintf('fig1_%d_%s_RMSE.png', arr_idx, array_names{arr_idx})));
+    % 保存 (高分辨率)
+    save_figure_hd(fig, fullfile(output_folder, sprintf('fig1_%d_%s_RMSE.png', arr_idx, array_names{arr_idx})));
     saveas(fig, fullfile(output_folder, sprintf('fig1_%d_%s_RMSE.eps', arr_idx, array_names{arr_idx})), 'epsc');
     close(fig);
 end
-fprintf('  已保存 fig1_1 到 fig1_8\n');
+fprintf('  已保存 fig1_1 到 fig1_8 (300 DPI)\n');
 
 %% 图2: 代表性阵列对比 (4个独立图)
 fprintf('生成图2系列: 代表性阵列对比...\n');
@@ -140,7 +146,7 @@ for i = 1:length(selected_arrays)
     xlabel('信噪比 (dB)', 'FontWeight', 'bold', 'FontSize', 12);
     ylabel('RMSE (°)', 'FontWeight', 'bold', 'FontSize', 12);
     title(sprintf('%s: 各运动模式RMSE', arr_display_names{i}), 'FontSize', 13, 'FontWeight', 'bold');
-    legend('Location', 'northeast', 'FontSize', 10);
+    legend('Location', 'southwest', 'FontSize', 10);  % 移到左下角避免遮挡数据
     grid on;
     box on;
     
@@ -148,11 +154,11 @@ for i = 1:length(selected_arrays)
     set(gca, 'YScale', 'log');
     xlim([snr_range(1)-1, snr_range(end)+1]);
     
-    saveas(fig, fullfile(output_folder, sprintf('fig2_%d_%s_运动模式对比.png', i, arr_display_names{i})));
+    save_figure_hd(fig, fullfile(output_folder, sprintf('fig2_%d_%s_运动模式对比.png', i, arr_display_names{i})));
     saveas(fig, fullfile(output_folder, sprintf('fig2_%d_%s_运动模式对比.eps', i, arr_display_names{i})), 'epsc');
     close(fig);
 end
-fprintf('  已保存 fig2_1 到 fig2_4\n');
+fprintf('  已保存 fig2_1 到 fig2_4 (300 DPI)\n');
 
 %% 图3: 孔径扩展对比 - 竖向水平条形图
 fprintf('生成图3: 孔径扩展对比...\n');
@@ -212,10 +218,10 @@ grid on;
 box on;
 set(gca, 'FontSize', 12);
 
-saveas(fig, fullfile(output_folder, 'fig3_孔径扩展对比.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig3_孔径扩展对比.png'));
 saveas(fig, fullfile(output_folder, 'fig3_孔径扩展对比.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig3\n');
+fprintf('  已保存 fig3 (300 DPI)\n');
 
 %% 图4: 改善倍数对比 - 竖向水平条形图
 fprintf('生成图4: 改善倍数对比...\n');
@@ -288,10 +294,10 @@ grid on;
 box on;
 set(gca, 'FontSize', 12);
 
-saveas(fig, fullfile(output_folder, 'fig4_改善倍数对比.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig4_改善倍数对比.png'));
 saveas(fig, fullfile(output_folder, 'fig4_改善倍数对比.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig4\n');
+fprintf('  已保存 fig4 (300 DPI)\n');
 
 %% 图5: 阵列形状可视化 (4个独立图)
 fprintf('生成图5系列: 阵列形状...\n');
@@ -356,11 +362,11 @@ for i = 1:length(display_arrays)
     xlim([-max_range, max_range]);
     ylim([-max_range, max_range]);
     
-    saveas(fig, fullfile(output_folder, sprintf('fig5_%d_%s_形状.png', i, display_arr_names{i})));
+    save_figure_hd(fig, fullfile(output_folder, sprintf('fig5_%d_%s_形状.png', i, display_arr_names{i})));
     saveas(fig, fullfile(output_folder, sprintf('fig5_%d_%s_形状.eps', i, display_arr_names{i})), 'epsc');
     close(fig);
 end
-fprintf('  已保存 fig5_1 到 fig5_4\n');
+fprintf('  已保存 fig5_1 到 fig5_4 (300 DPI)\n');
 
 %% 图6: 虚拟阵列轨迹 (3个独立图)
 fprintf('生成图6系列: 虚拟阵列轨迹...\n');
@@ -389,7 +395,7 @@ ylim([-2, 28]);
 aperture_static = (max(ula_elements(:,1)) - min(ula_elements(:,1))) / lambda;
 text(0, -1.5, sprintf('孔径: %.1fλ', aperture_static), ...
     'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 11);
-saveas(fig, fullfile(output_folder, 'fig6_1_静态轨迹.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig6_1_静态轨迹.png'));
 saveas(fig, fullfile(output_folder, 'fig6_1_静态轨迹.eps'), 'epsc');
 close(fig);
 
@@ -417,7 +423,7 @@ ylim([-2, 28]);
 aperture_y = (max(all_pos(:,2)) - min(all_pos(:,2))) / lambda;
 text(0, -1.5, sprintf('孔径: %.1fλ', aperture_y), ...
     'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 11);
-saveas(fig, fullfile(output_folder, 'fig6_2_Y平移轨迹.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig6_2_Y平移轨迹.png'));
 saveas(fig, fullfile(output_folder, 'fig6_2_Y平移轨迹.eps'), 'epsc');
 close(fig);
 
@@ -444,11 +450,11 @@ ylim([-5, 5]);
 aperture_rot = sqrt((max(all_pos(:,1))-min(all_pos(:,1)))^2 + (max(all_pos(:,2))-min(all_pos(:,2)))^2) / lambda;
 text(0, -4.2, sprintf('孔径: %.1fλ', aperture_rot), ...
     'HorizontalAlignment', 'center', 'FontWeight', 'bold', 'FontSize', 11);
-saveas(fig, fullfile(output_folder, 'fig6_3_旋转轨迹.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig6_3_旋转轨迹.png'));
 saveas(fig, fullfile(output_folder, 'fig6_3_旋转轨迹.eps'), 'epsc');
 close(fig);
 
-fprintf('  已保存 fig6_1 到 fig6_3\n');
+fprintf('  已保存 fig6_1 到 fig6_3 (300 DPI)\n');
 
 %% ═══════════════════════════════════════════════════════════════════════════
 %  第二部分: 双目标分辨实验图像 (蒙特卡洛版本)
@@ -509,10 +515,10 @@ grid on;
 box on;
 ylim([0, 110]);
 
-saveas(fig, fullfile(output_folder, 'fig7_分辨成功率对比.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig7_分辨成功率对比.png'));
 saveas(fig, fullfile(output_folder, 'fig7_分辨成功率对比.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig7\n');
+fprintf('  已保存 fig7 (300 DPI)\n');
 
 %% 图8: 最小可分辨角度对比 - 水平条形图 (90%成功率标准)
 fprintf('生成图8: 最小可分辨角度...\n');
@@ -556,10 +562,10 @@ ylim([0.3, 2.7]);
 grid on;
 box on;
 
-saveas(fig, fullfile(output_folder, 'fig8_最小可分辨角度.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig8_最小可分辨角度.png'));
 saveas(fig, fullfile(output_folder, 'fig8_最小可分辨角度.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig8\n');
+fprintf('  已保存 fig8 (300 DPI)\n');
 
 %% 图9: MUSIC谱对比 (找运动优势的间隔)
 fprintf('生成图9: MUSIC谱对比...\n');
@@ -599,7 +605,7 @@ grid on;
 box on;
 legend({'MUSIC谱', '真实目标'}, 'Location', 'south');
 
-saveas(fig, fullfile(output_folder, 'fig9_1_静态MUSIC谱.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig9_1_静态MUSIC谱.png'));
 saveas(fig, fullfile(output_folder, 'fig9_1_静态MUSIC谱.eps'), 'epsc');
 close(fig);
 
@@ -621,10 +627,10 @@ grid on;
 box on;
 legend({'时间平滑MUSIC谱', '真实目标'}, 'Location', 'south');
 
-saveas(fig, fullfile(output_folder, 'fig9_2_运动MUSIC谱.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig9_2_运动MUSIC谱.png'));
 saveas(fig, fullfile(output_folder, 'fig9_2_运动MUSIC谱.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig9_1, fig9_2\n');
+fprintf('  已保存 fig9_1, fig9_2 (300 DPI)\n');
 
 %% 图10: 不同SNR下的成功率曲线
 fprintf('生成图10: 不同SNR下的成功率曲线...\n');
@@ -666,10 +672,10 @@ box on;
 xlim([min(angle_separations)-1, max(angle_separations)+1]);
 ylim([0, 105]);
 
-saveas(fig, fullfile(output_folder, 'fig10_SNR对比成功率曲线.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig10_SNR对比成功率曲线.png'));
 saveas(fig, fullfile(output_folder, 'fig10_SNR对比成功率曲线.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig10\n');
+fprintf('  已保存 fig10 (300 DPI)\n');
 
 %% 图11: 多间隔MUSIC谱对比 (独立子图)
 fprintf('生成图11系列: 多间隔MUSIC谱...\n');
@@ -698,7 +704,7 @@ for s_idx = 1:length(selected_seps)
     xlabel('φ (°)', 'FontWeight', 'bold');
     ylabel('功率 (dB)', 'FontWeight', 'bold');
     title(sprintf('静态 %d° (成功率%.0f%%)', sep, static_success(idx)), 'FontWeight', 'bold');
-    saveas(fig, fullfile(output_folder, sprintf('fig11_%d_静态_%ddeg.png', s_idx, sep)));
+    save_figure_hd(fig, fullfile(output_folder, sprintf('fig11_%d_静态_%ddeg.png', s_idx, sep)));
     saveas(fig, fullfile(output_folder, sprintf('fig11_%d_静态_%ddeg.eps', s_idx, sep)), 'epsc');
     close(fig);
     
@@ -717,11 +723,11 @@ for s_idx = 1:length(selected_seps)
     xlabel('φ (°)', 'FontWeight', 'bold');
     ylabel('功率 (dB)', 'FontWeight', 'bold');
     title(sprintf('运动 %d° (成功率%.0f%%)', sep, motion_success(idx)), 'FontWeight', 'bold');
-    saveas(fig, fullfile(output_folder, sprintf('fig11_%d_运动_%ddeg.png', s_idx, sep)));
+    save_figure_hd(fig, fullfile(output_folder, sprintf('fig11_%d_运动_%ddeg.png', s_idx, sep)));
     saveas(fig, fullfile(output_folder, sprintf('fig11_%d_运动_%ddeg.eps', s_idx, sep)), 'epsc');
     close(fig);
 end
-fprintf('  已保存 fig11 系列\n');
+fprintf('  已保存 fig11 系列 (300 DPI)\n');
 
 %% ═══════════════════════════════════════════════════════════════════════════
 %  第三部分: 震动鲁棒性实验图像
@@ -767,10 +773,10 @@ box on;
 xlim([0, max(vibration_cm_range)*1.05]);
 ylim([0, 12]);
 
-saveas(fig, fullfile(output_folder, 'fig12_RMSE_vs_物理震动.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig12_RMSE_vs_物理震动.png'));
 saveas(fig, fullfile(output_folder, 'fig12_RMSE_vs_物理震动.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig12\n');
+fprintf('  已保存 fig12 (300 DPI)\n');
 
 %% 图13: RMSE vs 震动幅度(lambda)
 fprintf('生成图13: RMSE vs 电相位震动...\n');
@@ -802,10 +808,10 @@ box on;
 xlim([0, 0.15]);
 ylim([0, 12]);
 
-saveas(fig, fullfile(output_folder, 'fig13_RMSE_vs_电相位震动.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig13_RMSE_vs_电相位震动.png'));
 saveas(fig, fullfile(output_folder, 'fig13_RMSE_vs_电相位震动.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig13\n');
+fprintf('  已保存 fig13 (300 DPI)\n');
 
 %% 图14: 容许震动对比柱状图
 fprintf('生成图14: 容许震动对比...\n');
@@ -885,10 +891,10 @@ grid on;
 box on;
 set(gca, 'FontSize', 11);
 
-saveas(fig, fullfile(output_folder, 'fig14_容许震动对比.png'));
+save_figure_hd(fig, fullfile(output_folder, 'fig14_容许震动对比.png'));
 saveas(fig, fullfile(output_folder, 'fig14_容许震动对比.eps'), 'epsc');
 close(fig);
-fprintf('  已保存 fig14\n');
+fprintf('  已保存 fig14 (300 DPI)\n');
 
 %% ═══════════════════════════════════════════════════════════════════════════
 %  完成
