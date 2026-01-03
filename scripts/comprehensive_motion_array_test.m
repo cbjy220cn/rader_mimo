@@ -183,7 +183,7 @@ else
         fprintf('    - 第4层: %.2f° (±%.1f°范围) ← 最终精度\n', smart_2d.ultra_res, smart_2d.ultra_margin);
     else
         fprintf('  均匀搜索: 步进 0.5°\n');
-    end
+end
 end
 
 fprintf('  估计方法: 合成阵列用时间平滑MUSIC, 静态阵列用标准MUSIC\n');
@@ -358,14 +358,14 @@ for arr_idx = 1:length(array_configs)
             % 1D模式：只搜索phi（细网格）
             phi_for_beamwidth = (target_phi-10):0.02:(target_phi+10);
             est_options.search_mode = '1d';
-            
-            if mot_cfg.use_synthetic
-                estimator = DoaEstimatorSynthetic(array, radar_params);
+        
+        if mot_cfg.use_synthetic
+            estimator = DoaEstimatorSynthetic(array, radar_params);
                 grid_bw = struct('phi', phi_for_beamwidth);
                 [spectrum_bw, ~, ~] = estimator.estimate(snapshots_test, t_axis, grid_bw, 1, est_options);
                 results.beamwidth(arr_idx, mot_idx) = calc_beamwidth(spectrum_bw, phi_for_beamwidth);
-            else
-                positions = array.get_mimo_virtual_positions(0);
+        else
+            positions = array.get_mimo_virtual_positions(0);
                 spectrum_bw = music_standard_1d(snapshots_test, positions, phi_for_beamwidth, lambda, 1);
                 results.beamwidth(arr_idx, mot_idx) = calc_beamwidth(spectrum_bw, phi_for_beamwidth);
             end
@@ -408,22 +408,22 @@ for arr_idx = 1:length(array_configs)
                 
                 if strcmp(SEARCH_MODE, '1d')
                     % ===== 1D 模式 =====
-                    if mot_cfg.use_synthetic
-                        estimator = DoaEstimatorSynthetic(array, radar_params);
+                if mot_cfg.use_synthetic
+                    estimator = DoaEstimatorSynthetic(array, radar_params);
                         if USE_SMART_SEARCH_1D
                             est_phi = smart_search_1d_synthetic(estimator, snapshots, t_axis, smart_1d, 1, est_options);
                         else
                             grid_1d = struct('phi', phi_search_uniform);
                             [~, peaks, ~] = estimator.estimate(snapshots, t_axis, grid_1d, 1, est_options);
-                            est_phi = peaks.phi(1);
+                    est_phi = peaks.phi(1);
                         end
-                    else
-                        positions = array.get_mimo_virtual_positions(0);
+                else
+                    positions = array.get_mimo_virtual_positions(0);
                         if USE_SMART_SEARCH_1D
                             est_phi = smart_search_1d_static(snapshots, positions, lambda, smart_1d, 1);
                         else
                             spectrum = music_standard_1d(snapshots, positions, phi_search_uniform, lambda, 1);
-                            [~, peak_idx] = max(spectrum);
+                        [~, peak_idx] = max(spectrum);
                             est_phi = phi_search_uniform(peak_idx);
                         end
                     end
@@ -444,11 +444,11 @@ for arr_idx = 1:length(array_configs)
                         positions = array.get_mimo_virtual_positions(0);
                         if USE_SMART_SEARCH_2D
                             [est_theta, est_phi] = smart_search_2d_static(snapshots, positions, lambda, smart_2d, 1);
-                        else
-                            spectrum = music_standard_2d(snapshots, positions, search_grid_2d, lambda, 1);
-                            [~, idx] = max(spectrum(:));
+                    else
+                        spectrum = music_standard_2d(snapshots, positions, search_grid_2d, lambda, 1);
+                        [~, idx] = max(spectrum(:));
                             [theta_idx, phi_idx] = ind2sub(size(spectrum), idx);
-                            est_phi = search_grid_2d.phi(phi_idx);
+                        est_phi = search_grid_2d.phi(phi_idx);
                             est_theta = search_grid_2d.theta(theta_idx);
                         end
                     end
@@ -553,7 +553,7 @@ figure('Position', [50, 50, 1400, 700], 'Color', 'white');
 
 for arr_idx = 1:length(array_configs)
     subplot(2, 4, arr_idx);
-    hold on;
+hold on;
     
     % 静态
     rmse_static = squeeze(results.rmse(arr_idx, 1, :));
@@ -582,18 +582,18 @@ for arr_idx = 1:length(array_configs)
     % 线性坐标轴 - 更直观地显示差距
     set(gca, 'YScale', 'linear');
     xlabel('SNR (dB)', 'FontWeight', 'bold');
-    ylabel('RMSE (°)', 'FontWeight', 'bold');
+ylabel('RMSE (°)', 'FontWeight', 'bold');
     title(array_configs(arr_idx).name, 'FontWeight', 'bold', 'FontSize', 12);
     if arr_idx == 1
         legend('Location', 'northeast', 'FontSize', 8);
     end
-    grid on;
+grid on;
     
     % 动态设置Y轴范围，突出差异
     max_rmse = max([rmse_static; rmse_x; rmse_y; rmse_rot]);
     ylim([0, min(max_rmse * 1.1, 40)]);  % 限制最大35°以便看清差异
-    xlim([snr_range(1)-1, snr_range(end)+1]);
-    
+xlim([snr_range(1)-1, snr_range(end)+1]);
+
     % 添加孔径信息 - 放在左上角
     text(snr_range(1)+1, min(max_rmse*1.0, 35), ...
         sprintf('静态: %.1fλ', results.aperture(arr_idx, 1)), ...
@@ -624,24 +624,24 @@ for i = 1:4
     arr_idx = selected_arrays_fig2(i);
     hold on;
     
-    for mot_idx = 1:length(motion_configs)
-        rmse_curve = squeeze(results.rmse(arr_idx, mot_idx, :));
-        plot(snr_range, rmse_curve, ['-' motion_markers{mot_idx}], ...
-            'Color', motion_colors(mot_idx, :), ...
+for mot_idx = 1:length(motion_configs)
+    rmse_curve = squeeze(results.rmse(arr_idx, mot_idx, :));
+    plot(snr_range, rmse_curve, ['-' motion_markers{mot_idx}], ...
+        'Color', motion_colors(mot_idx, :), ...
             'LineWidth', 2.5, 'MarkerSize', 8, 'MarkerFaceColor', motion_colors(mot_idx, :), ...
-            'DisplayName', motion_configs(mot_idx).name);
-    end
+        'DisplayName', motion_configs(mot_idx).name);
+end
     
     % 线性坐标轴
     set(gca, 'YScale', 'linear');
-    xlabel('信噪比 (dB)', 'FontWeight', 'bold');
-    ylabel('RMSE (°)', 'FontWeight', 'bold');
+xlabel('信噪比 (dB)', 'FontWeight', 'bold');
+ylabel('RMSE (°)', 'FontWeight', 'bold');
     title(arr_names_fig2{i}, 'FontSize', 12, 'FontWeight', 'bold');
     
     if i == 1
         legend('Location', 'northeast', 'FontSize', 9);
     end
-    grid on;
+grid on;
     
     % 动态调整Y轴范围
     all_rmse = [];
@@ -650,8 +650,8 @@ for i = 1:4
     end
     max_rmse = max(all_rmse);
     ylim([0, min(max_rmse * 1.1, 35)]);
-    xlim([snr_range(1)-1, snr_range(end)+1]);
-    
+xlim([snr_range(1)-1, snr_range(end)+1]);
+
     % 计算并显示改善倍数
     static_rmse = results.rmse(arr_idx, 1, low_snr_idx);
     best_motion_rmse = min([results.rmse(arr_idx, 2, low_snr_idx), ...

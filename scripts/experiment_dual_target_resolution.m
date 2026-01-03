@@ -120,14 +120,14 @@ for snr_idx = 1:length(snr_values)
     fprintf('【SNR = %d dB】\n', snr_db);
     fprintf('间隔   | 静态成功率 | 运动成功率 | 差异\n');
     fprintf('-------|------------|------------|--------\n');
+
+for sep_idx = 1:length(angle_separations)
+    sep = angle_separations(sep_idx);
     
-    for sep_idx = 1:length(angle_separations)
-        sep = angle_separations(sep_idx);
-        
         % 双目标角度（方位角方向分离）
-        phi1 = phi_center - sep/2;
-        phi2 = phi_center + sep/2;
-        
+    phi1 = phi_center - sep/2;
+    phi2 = phi_center + sep/2;
+    
         static_success_count = 0;
         motion_success_count = 0;
         
@@ -136,19 +136,19 @@ for snr_idx = 1:length(snr_values)
             rng(sep_idx * 1000 + snr_idx * 100 + trial);
             
             % 水平面上的目标位置
-            target1_pos = target_range * [cosd(phi1), sind(phi1), 0];
-            target2_pos = target_range * [cosd(phi2), sind(phi2), 0];
-            
-            target1 = Target(target1_pos, [0,0,0], 1);
-            target2 = Target(target2_pos, [0,0,0], 1);
-            
-            % ===== 静态阵列 =====
+    target1_pos = target_range * [cosd(phi1), sind(phi1), 0];
+    target2_pos = target_range * [cosd(phi2), sind(phi2), 0];
+    
+    target1 = Target(target1_pos, [0,0,0], 1);
+    target2 = Target(target2_pos, [0,0,0], 1);
+    
+    % ===== 静态阵列 =====
             % 信号生成器已包含目标波动（每快拍独立幅度）
             % 这模拟真实环境，静态和运动阵列使用相同信号模型
-            array_static = ArrayPlatform(elements, 1, 1:num_elements);
-            array_static.set_trajectory(@(t) struct('position', [0,0,0], 'orientation', [0,0,0]));
-            
-            sig_gen_static = SignalGeneratorSimple(radar_params, array_static, {target1, target2});
+    array_static = ArrayPlatform(elements, 1, 1:num_elements);
+    array_static.set_trajectory(@(t) struct('position', [0,0,0], 'orientation', [0,0,0]));
+    
+            sig_gen_static = SignalGeneratorSimple(radar_params, array_static, {target1, target2}, 'fmcw');
             snapshots_static = sig_gen_static.generate_snapshots(t_axis, snr_db);
             
             % 静态MUSIC (1D)
@@ -157,38 +157,38 @@ for snr_idx = 1:length(snr_values)
             
             % 保存典型谱（第一次试验）
             if trial == 1 && snr_idx == typical_snr_idx
-                results.static_spectra{sep_idx} = spectrum_static;
+    results.static_spectra{sep_idx} = spectrum_static;
             end
             
             % 找两个最大峰值
             min_sep_search = max(0.5, sep * 0.4);
             peaks_static_phi = find_1d_peaks(spectrum_static, phi_search, 2, min_sep_search);
-            
+    
             % 判断是否分辨
             [static_resolved, ~] = check_resolution(peaks_static_phi, [phi1, phi2], sep);
             if static_resolved
                 static_success_count = static_success_count + 1;
             end
-            
+    
             % ===== 运动阵列 (y平移) =====
-            array_motion = ArrayPlatform(elements, 1, 1:num_elements);
-            array_motion.set_trajectory(@(t) struct('position', [0, v*t, 0], 'orientation', [0,0,0]));
-            
-            sig_gen_motion = SignalGeneratorSimple(radar_params, array_motion, {target1, target2});
+    array_motion = ArrayPlatform(elements, 1, 1:num_elements);
+    array_motion.set_trajectory(@(t) struct('position', [0, v*t, 0], 'orientation', [0,0,0]));
+    
+            sig_gen_motion = SignalGeneratorSimple(radar_params, array_motion, {target1, target2}, 'fmcw');
             snapshots_motion = sig_gen_motion.generate_snapshots(t_axis, snr_db);
             
             % 运动阵列：时间平滑MUSIC
-            estimator_motion = DoaEstimatorSynthetic(array_motion, radar_params);
+    estimator_motion = DoaEstimatorSynthetic(array_motion, radar_params);
             [spectrum_motion, ~, ~] = estimator_motion.estimate(snapshots_motion, t_axis, search_grid, 2, est_options);
-            
+    
             % 保存典型谱
             if trial == 1 && snr_idx == typical_snr_idx
-                results.motion_spectra{sep_idx} = spectrum_motion;
+    results.motion_spectra{sep_idx} = spectrum_motion;
             end
             
             % 峰值检测
             peaks_motion_phi = find_1d_peaks(spectrum_motion, phi_search, 2, min_sep_search);
-            
+    
             [motion_resolved, ~] = check_resolution(peaks_motion_phi, [phi1, phi2], sep);
             if motion_resolved
                 motion_success_count = motion_success_count + 1;
@@ -208,10 +208,10 @@ for snr_idx = 1:length(snr_values)
             diff_str = sprintf('+%.0f%%', motion_rate - static_rate);
         elseif static_rate > motion_rate + 10
             diff_str = sprintf('-%.0f%%', static_rate - motion_rate);
-        else
+    else
             diff_str = '≈';
-        end
-        
+    end
+    
         fprintf('  %2d°  |   %5.1f%%   |   %5.1f%%   | %s\n', sep, static_rate, motion_rate, diff_str);
     end
     fprintf('\n');
@@ -421,14 +421,14 @@ for i = 1:length(selected_idx)
     if ~isempty(results.static_spectra{idx})
         spectrum_db = 10*log10(results.static_spectra{idx} / max(results.static_spectra{idx}));
         plot(phi_search, spectrum_db, 'k-', 'LineWidth', 1.5);
-        hold on;
-        xline(phi1, 'r--', 'LineWidth', 1.5);
-        xline(phi2, 'r--', 'LineWidth', 1.5);
-        hold off;
+hold on;
+xline(phi1, 'r--', 'LineWidth', 1.5);
+xline(phi2, 'r--', 'LineWidth', 1.5);
+hold off;
     end
     xlim([max(30, phi_center-25), min(90, phi_center+25)]);
     ylim([-30, 5]);
-    grid on;
+grid on;
     if static_rate >= 90
         title_color = [0, 0.6, 0];  % 绿色
     elseif static_rate >= 50
@@ -445,15 +445,15 @@ for i = 1:length(selected_idx)
     subplot(2, length(selected_idx), i + length(selected_idx));
     if ~isempty(results.motion_spectra{idx})
         spectrum_db = 10*log10(results.motion_spectra{idx} / max(results.motion_spectra{idx}));
-        plot(phi_search, spectrum_db, 'b-', 'LineWidth', 1.5);
-        hold on;
-        xline(phi1, 'r--', 'LineWidth', 1.5);
-        xline(phi2, 'r--', 'LineWidth', 1.5);
-        hold off;
+plot(phi_search, spectrum_db, 'b-', 'LineWidth', 1.5);
+hold on;
+xline(phi1, 'r--', 'LineWidth', 1.5);
+xline(phi2, 'r--', 'LineWidth', 1.5);
+hold off;
     end
     xlim([max(30, phi_center-25), min(90, phi_center+25)]);
     ylim([-30, 5]);
-    grid on;
+grid on;
     xlabel('φ (°)', 'FontWeight', 'bold');
     if motion_rate >= 90
         title_color = [0, 0.6, 0];
