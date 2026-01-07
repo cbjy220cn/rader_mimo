@@ -1,0 +1,69 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║   综合运动阵列 DOA 性能测试 v2.3 (时间平滑MUSIC版本)     ║
+╚════════════════════════════════════════════════════════════════╝
+
+输出目录: validation_results\comprehensive_motion_array_test_20260104_153116
+
+【雷达系统参数】
+  载频: 3.00 GHz (λ = 9.99 cm)
+  带宽: 50 MHz, 距离分辨率: 3.0 m
+  Chirp周期: 10 ms
+  采样率: 100 MHz (避免混叠需 > 0.1 MHz)
+
+【阵列参数】
+  阵元间距: 5.00 cm (0.50λ)
+
+【实验参数】
+  目标: φ=30°, θ=75°, R=500m
+  观测时间: 0.5s, 快拍数: 64
+  运动: v=5m/s, 旋转90°
+  SNR范围: [-15, 20]dB, 试验次数: 30
+
+【搜索配置】
+  搜索模式: 2D DOA
+  搜索范围: θ ∈ [60°, 90°], φ ∈ [0°, 90°]
+  智能搜索: 启用 (四层搜索)
+    - 第1层: 2.0° (粗定位)
+    - 第2层: 0.5° (±5.0°范围)
+    - 第3层: 0.1° (±2.0°范围)
+    - 第4层: 0.01° (±0.5°范围) ← 最终精度
+  估计方法: 合成阵列用时间平滑MUSIC, 静态阵列用标准MUSIC
+
+【阵列形状定义】
+  1. ULA-8: 8元均匀线阵 (8阵元)
+  2. URA-3x3: 3×3均匀矩形阵 (9阵元)
+  3. URA-4x2: 4×2均匀矩形阵 (8阵元)
+  4. L阵列: L形阵列(4+4-1) (7阵元)
+  5. T阵列: T形阵列(5+5-1) (9阵元)
+  6. 圆阵-8: 8元圆形阵列 (8阵元)
+  7. 十字阵列: 十字形阵列 (9阵元)
+  8. Y阵列: Y形阵列(3臂) (10阵元)
+
+【运动模式定义】
+  1. 静态
+  2. x平移
+  3. y平移
+  4. 旋转
+  5. 平移+旋转
+
+═══════════════════════════════════════════════════════════════════
+开始实验 (8阵列 × 5运动 × 8SNR × 30试验)
+═══════════════════════════════════════════════════════════════════
+
+[1/40] ULA-8 + 静态: 孔径=1.8λ, 主瓣=0.4° [1D]
+[2/40] ULA-8 + x平移: 孔径=26.8λ, 主瓣=0.1° [1D]
+[3/40] ULA-8 + y平移: {操作在以下过程中被用户终止 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('DoaEstimatorSynthetic/search_2d', 'E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m', 450)" style="font-weight:bold">DoaEstimatorSynthetic/search_2d</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m',450,0)">第 450 行</a>)
+
+
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('DoaEstimatorSynthetic/estimate', 'E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m', 214)" style="font-weight:bold">DoaEstimatorSynthetic/estimate</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m',214,0)">第 214 行</a>)
+                    [spectrum, ~] = obj.search_2d(subarray_positions, Qn, search_grid, num_targets);
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('comprehensive_motion_array_test>smart_search_2d_synthetic', 'E:\code\matlab\rader_mimo\scripts\comprehensive_motion_array_test.m', 992)" style="font-weight:bold">comprehensive_motion_array_test>smart_search_2d_synthetic</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\comprehensive_motion_array_test.m',992,0)">第 992 行</a>)
+    [~, peaks_ultra, ~] = estimator.estimate(snapshots, t_axis, grid_ultra, num_targets, est_options);
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('comprehensive_motion_array_test', 'E:\code\matlab\rader_mimo\scripts\comprehensive_motion_array_test.m', 437)" style="font-weight:bold">comprehensive_motion_array_test</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\comprehensive_motion_array_test.m',437,0)">第 437 行</a>)
+                            [est_theta, est_phi] = smart_search_2d_synthetic(estimator, snapshots, t_axis, smart_2d, 1, est_options);
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+} 
+complex_trajectory_test

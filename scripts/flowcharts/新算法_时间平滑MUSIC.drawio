@@ -1,0 +1,58 @@
+<mxfile host="Electron" modified="2026-01-04T16:59:02.311Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.8 Chrome/114.0.5735.289 Electron/25.5.0 Safari/537.36" version="21.6.8" etag="5CD6G6wMkc37xTfqOhu2" type="device">
+  <diagram name="新算法流程图" id="new_algorithm">
+    <mxGraphModel dx="1100" dy="723" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="input" value="&lt;b&gt;输入信号&lt;/b&gt;&lt;br&gt;• 快拍矩阵 X[M×K]&lt;br&gt;• 时间轴 t[1×K]&lt;br&gt;• 平台轨迹 (任意运动)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="290" y="100" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="input" target="virtual" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="virtual" value="&lt;b&gt;虚拟阵列构建&lt;/b&gt;&lt;br&gt;• 每个时刻的阵元位置不同&lt;br&gt;• M阵元×K快拍 = M·K虚拟阵元&lt;br&gt;• 位置由平台轨迹确定&lt;br&gt;• 孔径 = 物理孔径 + 运动距离" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="290" y="210" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="virtual" target="smooth" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="smooth" value="&lt;b&gt;★ 时间平滑处理 ★&lt;/b&gt;&lt;br&gt;• 问题: 单快拍协方差秩=1&lt;br&gt;• 方案: 构建重叠子阵列&lt;br&gt;  - 子阵列1: [t1...tL]&lt;br&gt;  - 子阵列2: [t2...tL+1]&lt;br&gt;  - ...重叠滑动...&lt;br&gt;• N个子阵列 → 秩恢复" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="290" y="330" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="smooth" target="cov" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="550" y="390" />
+              <mxPoint x="550" y="100" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="cov" value="&lt;b&gt;平滑协方差矩阵 + 特征分解&lt;/b&gt;&lt;br&gt;• R = (1/N)·Σ(xi·xi&#39;)&lt;br&gt;• N个秩-1矩阵平均 → 满秩&lt;br&gt;• 对角加载增强稳定性" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="600" y="60" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="cov" target="steer" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="700" y="170" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="steer" value="&lt;b&gt;导向矢量构建&lt;/b&gt;&lt;br&gt;• 子阵列参考位置&lt;br&gt;• a(θ,φ) = exp(-j·4π/λ·pos·u)&lt;br&gt;• u = [sinθcosφ, sinθsinφ, cosθ]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="600" y="185" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="steer" target="music" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="music" value="&lt;b&gt;MUSIC谱搜索&lt;/b&gt;&lt;br&gt;• P(θ,φ) = 1/|a&#39;·Qn·Qn&#39;·a|&lt;br&gt;• 支持1D/2D搜索&lt;br&gt;• 可选: 智能多层搜索" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="600" y="295" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="music" target="output" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="700" y="405" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="output" value="&lt;b&gt;输出结果&lt;/b&gt;&lt;br&gt;• MUSIC谱 spectrum&lt;br&gt;• 峰值位置 θ̂, φ̂&lt;br&gt;• 合成孔径信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="600" y="425" width="200" height="80" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

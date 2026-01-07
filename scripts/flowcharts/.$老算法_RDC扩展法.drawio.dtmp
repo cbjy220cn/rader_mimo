@@ -1,0 +1,67 @@
+<mxfile host="Electron" modified="2026-01-04T16:51:18.206Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/21.6.8 Chrome/114.0.5735.289 Electron/25.5.0 Safari/537.36" version="21.6.8" etag="8JGwCISLYpd0LvBkpC9l" type="device">
+  <diagram name="老算法流程图" id="old_algorithm">
+    <mxGraphModel dx="1294" dy="851" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="input" value="&lt;b&gt;输入信号&lt;/b&gt;&lt;br&gt;• 雷达回波 mixed[numRX×N]&lt;br&gt;• 目标参数 (θ, φ, R)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="80" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="input" target="rotation" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rotation" value="&lt;b&gt;阵列旋转建模&lt;/b&gt;&lt;br&gt;• UCA圆阵绕z轴匀速旋转&lt;br&gt;• 旋转角速度 ω = 2π/(N_L·M·T)&lt;br&gt;• 位置: pos(t) = R·e^(jωt)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="180" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="rotation" target="rdc" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rdc" value="&lt;b&gt;构建RDC立方&lt;/b&gt;&lt;br&gt;• 距离FFT → 距离门&lt;br&gt;• 多普勒FFT → 速度门&lt;br&gt;• 维度: [距离×多普勒×通道]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="290" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="rdc" target="expand" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="expand" value="&lt;b&gt;★ RDC孔径扩展 ★&lt;/b&gt;&lt;br&gt;• 相邻chirp映射到虚拟阵元&lt;br&gt;• 第k个chirp → 第k个扩展位置&lt;br&gt;• 阵元数: M → M×N_num&lt;br&gt;• 孔径扩展 N_num 倍" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=0" parent="1" vertex="1">
+          <mxGeometry x="250" y="400" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="expand" target="correct" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="correct" value="&lt;b&gt;旋转相位修正&lt;/b&gt;&lt;br&gt;• circshift补偿旋转相位&lt;br&gt;• 方位角偏移 Δφ = 360°/M/N" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="520" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="correct" target="cov" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cov" value="&lt;b&gt;协方差矩阵&lt;/b&gt;&lt;br&gt;• 多chirp数据累加&lt;br&gt;• R = A&#39;·A&lt;br&gt;• 维度: [M·N_num × M·N_num]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="620" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="cov" target="eig" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eig" value="&lt;b&gt;特征分解&lt;/b&gt;&lt;br&gt;• [Q, D] = eig(R)&lt;br&gt;• 信号子空间 Qs&lt;br&gt;• 噪声子空间 Qn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="730" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="eig" target="music" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="music" value="&lt;b&gt;MUSIC谱搜索&lt;/b&gt;&lt;br&gt;• 导向矢量 a(θ,φ)&lt;br&gt;• P = 1 / |a&#39;·Qn·Qn&#39;·a|&lt;br&gt;• 2D角度网格搜索" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="840" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="music" target="peak" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="peak" value="&lt;b&gt;峰值检测+修正&lt;/b&gt;&lt;br&gt;• 找谱峰位置&lt;br&gt;• 方位角加回 Δφ 修正" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="950" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" parent="1" source="peak" target="output" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="output" value="&lt;b&gt;输出结果&lt;/b&gt;&lt;br&gt;• 估计角度 θ̂, φ̂" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11" parent="1" vertex="1">
+          <mxGeometry x="250" y="1050" width="200" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

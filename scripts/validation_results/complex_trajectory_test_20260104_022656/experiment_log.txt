@@ -1,0 +1,70 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║     复杂运动轨迹补充实验 - 稀疏阵列孔径填充验证              ║
+╚════════════════════════════════════════════════════════════════╝
+
+输出目录: validation_results\complex_trajectory_test_20260104_022656
+
+【雷达系统参数】
+  载频: 3.00 GHz (λ = 9.99 cm)
+  带宽: 50 MHz, 距离分辨率: 3.0 m
+
+【阵列参数】
+  正常间距: 5.00 cm (0.50λ)
+  稀疏间距: 19.99 cm (2.00λ) ← 存在栅瓣风险
+
+【实验参数】
+  目标: φ=30°, θ=75°, R=500m
+  观测时间: 0.5s, 快拍数: 64
+  SNR范围: [-10, 20]dB, 试验次数: 30
+
+【搜索配置】
+  搜索模式: 2D DOA
+  智能搜索: 启用 (四层搜索，最终精度0.01°)
+
+【阵列定义】- 稀疏阵列与密集阵列对比
+  1. 十字阵-密集: 十字阵(0.5λ间距,9元) (9阵元) (基准)
+  2. 十字阵-1.0λ: 十字阵(1.0λ间距,9元) (9阵元) ⚠稀疏
+  3. 十字阵-1.5λ: 十字阵(1.5λ间距,9元) (9阵元) ⚠稀疏
+  4. 圆阵-密集: 圆阵(0.65λ半径,8元) (8阵元) (基准)
+  5. 圆阵-1.0λ: 圆阵(1.0λ半径,8元) (8阵元) ⚠稀疏
+  6. 圆阵-1.5λ: 圆阵(1.5λ半径,8元) (8阵元) ⚠稀疏
+  7. Y阵-密集: Y阵(0.5λ间距,10元) (10阵元) (基准)
+  8. Y阵-1.0λ: Y阵(1.0λ间距,10元) (10阵元) ⚠稀疏
+  9. Y阵-1.5λ: Y阵(1.5λ间距,10元) (10阵元) ⚠稀疏
+  10. URA-密集: URA(0.5λ间距,3×3=9元) (9阵元) (基准)
+  11. URA-1.0λ: URA(1.0λ间距,3×3=9元) (9阵元) ⚠稀疏
+  12. URA-1.5λ: URA(1.5λ间距,3×3=9元) (9阵元) ⚠稀疏
+
+【复杂运动模式定义】
+  1. 静态: 无运动基准
+  2. X平移: 纯X方向平移
+  3. 对角平移: xy同向平移
+  4. 螺旋上升: 圆周+上升
+  5. 8字形: Lissajous曲线
+  6. 圆弧平移: 半圆+直线
+
+═══════════════════════════════════════════════════════════════════
+开始实验 (12阵列 × 6运动 × 7SNR × 30试验)
+═══════════════════════════════════════════════════════════════════
+
+[1/72] 十字阵-密集 + 静态: 孔径=1.4λ(x:1.0,y:1.0,z:0.0), 主瓣=0.3°, 填充=0.44, 方法=静态
+[2/72] 十字阵-密集 + X平移: 孔径=26.0λ(x:26.0,y:1.0,z:0.0), 主瓣=1.7°, 填充=0.71, 方法=时间平滑
+[3/72] 十字阵-密集 + 对角平移: 孔径=36.8λ(x:26.0,y:26.0,z:0.0), 主瓣=2.4°, 填充=0.04, 方法=时间平滑
+[4/72] 十字阵-密集 + 螺旋上升: 孔径=10.2λ(x:7.0,y:7.0,z:2.5), 主瓣=N/A, 填充=0.04, 方法=时间平滑
+[5/72] 十字阵-密集 + 8字形: 孔径=35.4λ(x:31.0,y:17.0,z:0.0), 主瓣=N/A, 填充=0.07, 方法=时间平滑
+[6/72] 十字阵-密集 + 圆弧平移: 孔径=28.2λ(x:11.0,y:26.0,z:0.0), 主瓣=N/A, 填充=0.09, 方法=时间平滑
+[7/72] 十字阵-1.0λ + 静态: 孔径=2.8λ(x:2.0,y:2.0,z:0.0), 主瓣=0.2°, 填充=0.14, 方法=静态
+[8/72] 十字阵-1.0λ + X平移: {操作在以下过程中被用户终止 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('DoaEstimatorSynthetic/search_2d', 'E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m', 469)" style="font-weight:bold">DoaEstimatorSynthetic/search_2d</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m',469,0)">第 469 行</a>)
+
+
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('DoaEstimatorSynthetic/estimate', 'E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m', 233)" style="font-weight:bold">DoaEstimatorSynthetic/estimate</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\asset\DoaEstimatorSynthetic.m',233,0)">第 233 行</a>)
+                    [spectrum, ~] = obj.search_2d(subarray_positions, Qn, search_grid, num_targets);
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('complex_trajectory_test>smart_search_2d_synthetic', 'E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m', 1157)" style="font-weight:bold">complex_trajectory_test>smart_search_2d_synthetic</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m',1157,0)">第 1157 行</a>)
+    [~, peaks_fine, ~] = estimator.estimate(snapshots, t_axis, grid_fine, num_targets, est_options);
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('complex_trajectory_test', 'E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m', 428)" style="font-weight:bold">complex_trajectory_test</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m',428,0)">第 428 行</a>)
+                        [est_theta, est_phi] = smart_search_2d_synthetic(estimator, snapshots, t_axis, smart_2d, 1, est_options);
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+} 

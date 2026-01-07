@@ -1,0 +1,32 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║     复杂运动轨迹补充实验 - 稀疏阵列孔径填充验证              ║
+╚════════════════════════════════════════════════════════════════╝
+
+输出目录: validation_results\complex_trajectory_test_20260103_220835
+
+【雷达系统参数】
+  载频: 3.00 GHz (λ = 9.99 cm)
+  带宽: 50 MHz, 距离分辨率: 3.0 m
+
+【阵列参数】
+  正常间距: 5.00 cm (0.50λ)
+  稀疏间距: 19.99 cm (2.00λ) ← 存在栅瓣风险
+
+【实验参数】
+  目标: φ=30°, θ=75°, R=500m
+  观测时间: 0.5s, 快拍数: 64
+  SNR范围: [-10, 20]dB, 试验次数: 30
+
+【搜索配置】
+  搜索模式: 2D DOA
+  智能搜索: 启用 (四层搜索，最终精度0.01°)
+
+【阵列定义】- 稀疏阵列与密集阵列对比
+{无法识别的字段名称 "has_grating_lobe"。
+
+出错 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('complex_trajectory_test', 'E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m', 243)" style="font-weight:bold">complex_trajectory_test</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\complex_trajectory_test.m',243,0)">第 243 行</a>)
+    if array_configs(i).has_grating_lobe
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+} 
+complex_trajectory_test

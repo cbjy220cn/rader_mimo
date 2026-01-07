@@ -1,0 +1,204 @@
+<mxfile host="app.diagrams.net" modified="2026-01-04T22:00:00.000Z" agent="Claude" version="21.0.0">
+  <diagram name="算法对比" id="comparison">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- 大标题 -->
+        <mxCell id="main_title" value="DOA估计算法流程对比" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="10" width="300" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- 左侧标题 -->
+        <mxCell id="left_title" value="老算法：先验轨迹RDC扩展法" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="100" y="60" width="250" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- 右侧标题 -->
+        <mxCell id="right_title" value="新算法：时间平滑MUSIC" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="550" y="60" width="250" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- ===== 左侧流程 ===== -->
+        
+        <!-- 输入信号 左 -->
+        <mxCell id="input_L" value="&lt;b&gt;输入信号&lt;/b&gt;&lt;br&gt;雷达回波 + 目标参数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="100" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="input_L" target="rot_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 阵列旋转 -->
+        <mxCell id="rot_L" value="&lt;b&gt;阵列旋转建模&lt;/b&gt;&lt;br&gt;UCA绕z轴匀速旋转&lt;br&gt;ω = 2π/(N_L·M·T)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="170" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="rot_L" target="rdc_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- RDC -->
+        <mxCell id="rdc_L" value="&lt;b&gt;构建RDC立方&lt;/b&gt;&lt;br&gt;距离FFT + 多普勒FFT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="250" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="rdc_L" target="expand_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 孔径扩展 -->
+        <mxCell id="expand_L" value="&lt;b&gt;★ RDC孔径扩展 ★&lt;/b&gt;&lt;br&gt;相邻chirp→虚拟阵元&lt;br&gt;M → M×N_num" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="320" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="expand_L" target="corr_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 旋转修正 -->
+        <mxCell id="corr_L" value="&lt;b&gt;旋转相位修正&lt;/b&gt;&lt;br&gt;circshift + Δφ补偿" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="400" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="corr_L" target="cov_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 协方差 -->
+        <mxCell id="cov_L" value="&lt;b&gt;协方差矩阵&lt;/b&gt;&lt;br&gt;R = A'·A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="470" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="cov_L" target="music_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- MUSIC -->
+        <mxCell id="music_L" value="&lt;b&gt;特征分解 + MUSIC&lt;/b&gt;&lt;br&gt;eig(R) → Qn → 谱搜索" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="540" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_L7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="music_L" target="out_L">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 输出 -->
+        <mxCell id="out_L" value="&lt;b&gt;输出&lt;/b&gt; θ̂, φ̂" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="125" y="610" width="180" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- ===== 右侧流程 ===== -->
+        
+        <!-- 输入信号 右 -->
+        <mxCell id="input_R" value="&lt;b&gt;输入信号&lt;/b&gt;&lt;br&gt;快拍X[M×K] + 时间轴 + 轨迹" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="100" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="input_R" target="virt_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 虚拟阵列 -->
+        <mxCell id="virt_R" value="&lt;b&gt;虚拟阵列构建&lt;/b&gt;&lt;br&gt;M×K个虚拟阵元&lt;br&gt;孔径 = 物理 + 运动距离" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="170" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="virt_R" target="smooth_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 时间平滑 -->
+        <mxCell id="smooth_R" value="&lt;b&gt;★ 时间平滑 ★&lt;/b&gt;&lt;br&gt;重叠子阵列划分&lt;br&gt;秩-1→满秩恢复" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="250" width="180" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="smooth_R" target="cov_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 平滑协方差 -->
+        <mxCell id="cov_R" value="&lt;b&gt;平滑协方差矩阵&lt;/b&gt;&lt;br&gt;R = (1/N)·Σ(xi·xi')" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="330" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="cov_R" target="steer_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 导向矢量 -->
+        <mxCell id="steer_R" value="&lt;b&gt;导向矢量构建&lt;/b&gt;&lt;br&gt;a(θ,φ) = exp(-j·4π/λ·pos·u)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="400" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="steer_R" target="music_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- MUSIC -->
+        <mxCell id="music_R" value="&lt;b&gt;特征分解 + MUSIC&lt;/b&gt;&lt;br&gt;eig(R) → Qn → 谱搜索" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="470" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="music_R" target="peak_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 峰值检测 -->
+        <mxCell id="peak_R" value="&lt;b&gt;峰值检测&lt;/b&gt;&lt;br&gt;2D搜索 / CFAR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="540" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="arr_R7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2" edge="1" parent="1" source="peak_R" target="out_R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- 输出 -->
+        <mxCell id="out_R" value="&lt;b&gt;输出&lt;/b&gt; θ̂, φ̂ + 孔径信息" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10" vertex="1" parent="1">
+          <mxGeometry x="575" y="610" width="180" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- ===== 中间分隔线 ===== -->
+        <mxCell id="divider" value="" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;strokeColor=#666666" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="450" y="660" as="sourcePoint" />
+            <mxPoint x="450" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- ===== 底部对比表 ===== -->
+        <mxCell id="table_title" value="核心差异" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="680" width="100" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff1" value="✗ 仅支持UCA旋转" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="100" y="710" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff1r" value="✓ 任意阵列+任意轨迹" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="550" y="710" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff2" value="✗ 需精确先验轨迹" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="100" y="730" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff2r" value="✓ 实时轨迹即可" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="550" y="730" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff3" value="✗ 相位修正复杂" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#b85450" vertex="1" parent="1">
+          <mxGeometry x="100" y="750" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="diff3r" value="✓ 导向矢量自动匹配" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#6c8ebf" vertex="1" parent="1">
+          <mxGeometry x="550" y="750" width="150" height="20" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
+

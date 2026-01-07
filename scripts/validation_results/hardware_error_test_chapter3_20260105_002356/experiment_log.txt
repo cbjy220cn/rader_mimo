@@ -1,0 +1,43 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║  第三章补充实验：飞行定位误差鲁棒性测试                      ║
+║  基于先验轨迹的孔径扩展方法（UCA旋转）                       ║
+╚════════════════════════════════════════════════════════════════╝
+
+输出目录: validation_results\hardware_error_test_chapter3_20260105_002356
+
+【雷达系统参数】
+  载频: 3.00 GHz (λ = 9.99 cm)
+  带宽: 50 MHz, PRI: 10 ms
+  Chirp数: 256 × 10 CPI = 2560
+
+【阵列参数】
+  接收阵列: 8元UCA, 半径 5.00 cm
+  孔径扩展因子 N_L: 4 (等效 7 个位置)
+  扩展后等效阵元数: 8 × 7 = 56
+
+【目标参数】
+  目标: θ=30°, φ=60°, R=660m
+
+【误差参数设置】
+  位置误差标准差: 0cm 1cm 5cm 10cm 20cm 50cm 
+  姿态角误差标准差: 0.0° 0.5° 1.0° 2.0° 5.0° 10.0° 
+  SNR测试点: 10dB 20dB 30dB 50dB 
+  蒙特卡洛次数: 30
+
+═══════════════════════════════════════════════════════════════════
+实验1: 位置误差对运动阵列DOA估计的影响
+═══════════════════════════════════════════════════════════════════
+
+  位置误差=0cm, SNR=10dB: RMSE_θ=0.47°, RMSE_φ=0.07°
+  位置误差=0cm, SNR=20dB: RMSE_θ=0.50°, RMSE_φ=0.07°
+  位置误差=0cm, SNR=30dB: RMSE_θ=0.50°, RMSE_φ=0.07°
+  位置误差=0cm, SNR=50dB: RMSE_θ=0.50°, RMSE_φ=0.07°
+{操作在以下过程中被用户终止 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('hardware_error_test_chapter3>radar_processing_with_error', 'E:\code\matlab\rader_mimo\scripts\hardware_error_test_chapter3.m', 542)" style="font-weight:bold">hardware_error_test_chapter3>radar_processing_with_error</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\hardware_error_test_chapter3.m',542,0)">第 542 行</a>)
+
+
+位置 <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('hardware_error_test_chapter3', 'E:\code\matlab\rader_mimo\scripts\hardware_error_test_chapter3.m', 137)" style="font-weight:bold">hardware_error_test_chapter3</a> (<a href="matlab: opentoline('E:\code\matlab\rader_mimo\scripts\hardware_error_test_chapter3.m',137,0)">第 137 行</a>)
+                tar1_theta, tar1_phi, r1_radial, ...
+                                   ^
+} 
+hardware_error_test_chapter3
